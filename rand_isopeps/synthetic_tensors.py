@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 import numpy as np
+import scipy.linalg as la
 
 from .tn_shapes import MosesDims
 
@@ -78,6 +79,57 @@ def make_local_ring_exact(
     v_first = singular_values[:, None] * row_basis
     b_mat = q1 @ v_first
     return b_mat.reshape(dims.tensor_shape)
+
+
+def make_disentanglable_local(
+    dims: MosesDims,
+    rng: np.random.Generator,
+    entangle: float = 1.0,
+    noise: float = 1e-6,
+) -> np.ndarray:
+    """Real local tensor that is disentanglable across the second-SVD cut.
+
+    Build an orthonormal residual basis ``row_basis`` whose reshuffled matrix
+    ``A(row_basis)`` has rank ``eta`` (a clean rank-eta cut), then scramble the
+    bond index with a hidden orthogonal rotation ``Q_hidden`` so the matrix
+    entering the second SVD is no longer low rank. There then *exists* a
+    disentangler (``~ Q_hidden^T``) that recovers rank ``eta``.
+
+    The first-cut spectrum is left *flat* on purpose: a left bond rotation on a
+    factor with distinct singular values is reabsorbed by the canonicalizing
+    first SVD (it is pure gauge), so the entanglement would never reach the
+    second cut. With a degenerate (flat) first-cut spectrum the SVD bond gauge
+    is free, the rotation survives into ``vtilde``, and ``A(vtilde)`` is
+    genuinely high rank. ``entangle`` in [0, 1] sets the largest rotation angle
+    (``entangle * pi/2``): 0 leaves the tensor already disentangled (control),
+    1 makes a naive rank-eta truncation strongly lossy. ``noise`` sets the floor
+    below which the cut cannot be disentangled.
+
+    Real-valued so the Riemannian (pymanopt) disentangler can run on O(k1).
+    """
+    q1 = random_orthonormal_columns(dims.n1, dims.k1, rng, complex_valued=False)
+    x = random_orthonormal_rows(dims.eta, dims.n2, rng, complex_valued=False)
+    y = random_orthonormal_rows(dims.chi, dims.n3, rng, complex_valued=False)
+
+    # orthonormal rows; A(row_basis) is block-diagonal in the eta index -> rank eta
+    row_basis = np.einsum("au,cr->acur", x, y, optimize=True).reshape(dims.k1, dims.n2 * dims.n3)
+
+    g = rng.standard_normal((dims.k1, dims.k1))
+    skew = g - g.T
+    spectral = np.linalg.norm(skew, 2)
+    if spectral > 0:
+        skew = skew / spectral
+    q_hidden = la.expm(entangle * (np.pi / 2.0) * skew)
+    vtilde = q_hidden @ row_basis  # still orthonormal rows; A(vtilde) high rank
+
+    b = (q1 @ vtilde).reshape(dims.tensor_shape)
+    if noise > 0:
+        e = rng.standard_normal(b.shape)
+        e_norm = np.linalg.norm(e)
+        b_norm = np.linalg.norm(b)
+        if e_norm > 0 and b_norm > 0:
+            b = b + noise * b_norm * e / e_norm
+    return b
 
 
 def add_relative_noise(

@@ -1,6 +1,6 @@
 # randomized-isopeps
 
-Research testbed for **randomized linear algebra inside the block Moses Move** of
+Research code for **randomized linear algebra inside the block Moses Move** of
 isoPEPS / block-isoPEPS. The goal is to replace selected deterministic SVD and
 compression steps with structured randomized low-rank approximation without
 destroying approximate isometry or energy-relevant accuracy.
@@ -10,8 +10,13 @@ destroying approximate isometry or energy-relevant accuracy.
 ```text
 randomized-isopeps/
   rand_isopeps/      shared library: rSVD backends, tensor-ring decomposition,
-                     MPO-MPS absorption, synthetic ensembles, plotting/IO/parallel
-  synthetic/         synthetic quick-experiment suite (experiments + outputs)
+                     disentangler + ALS, MPO-MPS absorption, synthetic ensembles,
+                     plotting/IO/parallel
+  synthetic/         synthetic quick-experiment suite
+    experiments/     exp1..exp5 driver scripts
+    figures/         curated result plots (committed)
+    outputs/         scratch CSV data + timestamped figures (gitignored)
+    summary.md       goals + results writeup of the experiments
   docs/              reference papers (local only, gitignored)
 ```
 
@@ -40,16 +45,29 @@ python3 synthetic/experiments/exp1_local_first_vs_second_svd.py --quick
 python3 synthetic/experiments/exp2_column_error_accumulation.py --quick
 python3 synthetic/experiments/exp3_r_column_absorption.py --quick
 python3 synthetic/experiments/exp4_tiny_full_isopeps_validation.py --quick
+python3 synthetic/experiments/exp5_disentangler_ablation.py --quick
 
 # larger first pass
 python3 synthetic/experiments/exp1_local_first_vs_second_svd.py --chi 4 --etas 4 6 8 10 --p 2 --trials 3
 python3 synthetic/experiments/exp2_column_error_accumulation.py --chi 4 --eta 8 --lx-values 2 4 6 8 10 --trials 3
 python3 synthetic/experiments/exp3_r_column_absorption.py --chi 4 --etas 4 6 8 10 --l-sites 8 --trials 3
+python3 synthetic/experiments/exp5_disentangler_ablation.py --chi 3 --etas 3 4 5 6 --p 2 --trials 3
 ```
 
-Figures are vector PDF; data is CSV. Both are regenerated on each run and are
-**not** version-controlled (see `.gitignore`). Plotting uses matplotlib with the
-non-interactive `Agg` backend via `rand_isopeps/plotting.py`.
+exp1–exp4 isolate where randomized SVD enters (see `synthetic/summary.md`). exp5
+adds the **disentangler** before the second SVD and compares: no disentangler,
+alternating-min and Riemannian (pymanopt) disentanglers, a randomized final SVD,
+a *sketched* disentangler search, and tensor-ring ALS (random / warm-started).
+
+Each run writes raw CSV and timestamped PDF figures under `synthetic/outputs/`
+(gitignored, regenerated every run). The **curated** plots that tell the story
+live under `synthetic/figures/` and are committed so collaborators can see
+results without pulling data. Plotting uses matplotlib with the non-interactive
+`Agg` backend via `rand_isopeps/plotting.py`.
+
+The Riemannian disentangler (`exp5` method `B_riem`) needs `pymanopt`
+(`pip install pymanopt`); the alternating-minimization disentangler is the
+dependency-free default.
 
 Experiment scripts accept `--workers` and `--blas-threads`. By default,
 `--workers 0` chooses a conservative local process count and `--blas-threads 1`
@@ -62,9 +80,12 @@ first sparse sketching option.
 
 ## current modeling choices
 
-The local tensor-ring decomposition intentionally omits the optional nonlinear
-disentangler. This isolates the two SVDs as randomized low-rank approximation
-targets.
+The exp1–exp4 local tensor-ring decomposition intentionally omits the optional
+disentangler, isolating the two SVDs as randomized low-rank approximation
+targets. exp5 reintroduces the disentangler as a unitary gauge on the bond
+before the second SVD (`rand_isopeps/disentangler.py`) and studies optimizing it
+exactly, via a randomized/sketched objective, and against tensor-ring ALS
+(`rand_isopeps/als_ring.py`).
 
 The column experiment is a product-column surrogate: it measures accumulated
 local Moses Move approximation error without building a full PEPS or a full

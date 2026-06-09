@@ -5,9 +5,10 @@
 # reference papers (kept locally, not published)
 /docs/
 
-# generated experiment results (regenerable; recreated on each run)
-**/outputs/data/
-**/outputs/figures/
+# scratch experiment outputs: raw CSV data and every timestamped figure.
+# Curated, relevant plots are committed under each suite's figures/ dir instead,
+# so collaborators see the results without versioning data or every run.
+**/outputs/
 
 # python
 __pycache__/
