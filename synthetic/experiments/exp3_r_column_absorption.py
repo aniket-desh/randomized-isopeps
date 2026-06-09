@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 from pathlib import Path
 import sys
 
@@ -12,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
+from rand_isopeps.aggregate import median_band
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.mpo_mps_absorb import run_absorption_case
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
@@ -24,6 +24,8 @@ METHODS = ("zipup_svd", "randomized")
 def _run_absorption_task(task: tuple[argparse.Namespace, int, int]) -> list[dict[str, object]]:
     args, eta, trial = task
     with with_blas_threads(args.blas_threads):
+        # warm BLAS/LAPACK so the first timed compression is not cold-started
+        np.linalg.svd(np.random.default_rng(0).standard_normal((eta * args.chi, eta * args.chi)))
         results = run_absorption_case(
             l_sites=args.l_sites,
             phys_dim=args.d * args.p,
@@ -35,7 +37,7 @@ def _run_absorption_task(task: tuple[argparse.Namespace, int, int]) -> list[dict
             sketch=args.sketch,
             seed=args.seed + 1000 * eta + trial,
         )
-        return [
+        rows = [
             {
                 **result.as_dict(),
                 "chi": args.chi,
@@ -49,6 +51,12 @@ def _run_absorption_task(task: tuple[argparse.Namespace, int, int]) -> list[dict
             }
             for result in results
         ]
+        # excess error of randomized vs zip-up on the *same* product
+        by_method = {str(r["method"]): float(r["rel_error_exact"]) for r in rows}
+        zip_err = by_method.get("zipup_svd", float("nan"))
+        for row in rows:
+            row["excess_error"] = float(row["rel_error_exact"]) - zip_err
+        return rows
 
 
 def run(args: argparse.Namespace) -> tuple[str, str]:
@@ -63,44 +71,25 @@ def run(args: argparse.Namespace) -> tuple[str, str]:
     return csv_path, fig_path
 
 
-def grouped_mean(rows: list[dict[str, object]], key: str) -> dict[str, tuple[list[int], list[float]]]:
-    grouped: dict[tuple[str, int], list[float]] = defaultdict(list)
-    for row in rows:
-        grouped[(str(row["method"]), int(row["eta"]))].append(float(row[key]))
-    out: dict[str, tuple[list[int], list[float]]] = {}
-    for method in METHODS:
-        xs = sorted({eta for m, eta in grouped if m == method})
-        ys = [float(np.mean(grouped[(method, eta)])) for eta in xs]
-        out[method] = (xs, ys)
-    return out
+def _series(rows: list[dict[str, object]], key: str, methods: tuple[str, ...]) -> list[Series]:
+    bands = median_band(rows, group_key="method", x_key="eta", value_key=key, group_order=methods)
+    return [
+        Series(
+            label=method.replace("_", " "),
+            x=[float(v) for v in xs], y=med, ylow=lo, yhigh=hi,
+            color=PALETTE[method], marker=MARKERS[method],
+        )
+        for method, (xs, med, lo, hi) in bands.items()
+    ]
 
 
 def make_plot(rows: list[dict[str, object]], fig_path: str) -> None:
-    panels: list[Panel] = []
-    for title, key, ylabel, yscale in [
-        ("R-column absorption", "runtime_s", "compression runtime (s)", "linear"),
-        ("compression error", "rel_error_exact", "error vs exact product", "log"),
-    ]:
-        series = grouped_mean(rows, key)
-        panels.append(
-            Panel(
-                title=title,
-                xlabel="eta",
-                ylabel=ylabel,
-                yscale=yscale,
-                series=[
-                    Series(
-                        label=method.replace("_", " "),
-                        x=[float(v) for v in xs],
-                        y=ys,
-                        color=PALETTE[method],
-                        marker=MARKERS[method],
-                    )
-                    for method, (xs, ys) in series.items()
-                ],
-            )
-        )
-    write_line_panels(fig_path, panels, width=820, height=420)
+    panels = [
+        Panel("R-column absorption", "eta", "compression runtime (s)", "linear", _series(rows, "runtime_s", METHODS)),
+        Panel("compression error", "eta", "error vs exact product", "log", _series(rows, "rel_error_exact", METHODS)),
+        Panel("excess error vs zip-up", "eta", "rel error (rand - zipup)", "linear", _series(rows, "excess_error", ("randomized",))),
+    ]
+    write_line_panels(fig_path, panels, width=1180, height=440)
 
 
 def parse_args() -> argparse.Namespace:
@@ -110,7 +99,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--etas", type=int, nargs="+", default=[4, 6, 8, 10])
     parser.add_argument("--d", type=int, default=2)
     parser.add_argument("--p", type=int, default=2)
-    parser.add_argument("--trials", type=int, default=3)
+    parser.add_argument("--trials", type=int, default=12)
     parser.add_argument("--oversample", type=int, default=6)
     parser.add_argument("--n-power", type=int, default=1)
     parser.add_argument("--sketch", choices=["gaussian", "rademacher", "countsketch"], default="gaussian")

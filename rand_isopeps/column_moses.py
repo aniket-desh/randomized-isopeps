@@ -78,6 +78,7 @@ def run_column_moses_surrogate(
     ensemble: EnsembleKind = "noisy_ring",
     noise: float = 1e-4,
     decay: float = 0.92,
+    spectrum_param: float = 1.0,
     oversample: int = 8,
     n_power: int = 1,
     sketch: SketchKind = "gaussian",
@@ -87,7 +88,10 @@ def run_column_moses_surrogate(
         raise ValueError("lx must be positive")
 
     rng = np.random.default_rng(seed)
-    tensors = [make_local_tensor(dims, rng, ensemble=ensemble, noise=noise, decay=decay) for _ in range(lx)]
+    tensors = [
+        make_local_tensor(dims, rng, ensemble=ensemble, noise=noise, decay=decay, spectrum_param=spectrum_param)
+        for _ in range(lx)
+    ]
     approximations: list[np.ndarray] = []
     local_errors: list[float] = []
     first_iso: list[float] = []

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 from pathlib import Path
 import sys
 
@@ -12,11 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
+from rand_isopeps.aggregate import median_band
 from rand_isopeps.column_moses import run_column_moses_surrogate
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
-from rand_isopeps.local_ring_decomp import LocalMode
+from rand_isopeps.local_ring_decomp import LocalMode, local_ring_decomp
 from rand_isopeps.parallel import auto_worker_count, run_parallel, with_blas_threads
 from rand_isopeps.plotting import MARKERS, PALETTE, Panel, Series, write_line_panels
+from rand_isopeps.synthetic_tensors import make_local_tensor
 from rand_isopeps.tn_shapes import MosesDims
 
 
@@ -27,6 +28,9 @@ def _run_column_task(task: tuple[argparse.Namespace, int, int, LocalMode]) -> di
     args, lx, trial, mode = task
     with with_blas_threads(args.blas_threads):
         dims = MosesDims(chi=args.chi, eta=args.eta, d=args.d, p=args.p)
+        # warm BLAS for these sizes so the timed surrogate is not cold-started
+        warm = make_local_tensor(dims, np.random.default_rng(0), ensemble=args.ensemble)
+        local_ring_decomp(warm, dims, mode=mode)
         result = run_column_moses_surrogate(
             dims,
             lx=lx,
@@ -34,6 +38,7 @@ def _run_column_task(task: tuple[argparse.Namespace, int, int, LocalMode]) -> di
             ensemble=args.ensemble,
             noise=args.noise,
             decay=args.decay,
+            spectrum_param=args.spectrum_param,
             oversample=args.oversample,
             n_power=args.n_power,
             sketch=args.sketch,
@@ -44,6 +49,7 @@ def _run_column_task(task: tuple[argparse.Namespace, int, int, LocalMode]) -> di
             "trial": trial,
             "ensemble": args.ensemble,
             "noise": args.noise,
+            "spectrum_param": args.spectrum_param,
             "oversample": args.oversample,
             "n_power": args.n_power,
             "sketch": args.sketch,
@@ -67,43 +73,23 @@ def run(args: argparse.Namespace) -> tuple[str, str]:
     return csv_path, fig_path
 
 
-def grouped_mean(rows: list[dict[str, object]], key: str) -> dict[str, tuple[list[int], list[float]]]:
-    grouped: dict[tuple[str, int], list[float]] = defaultdict(list)
-    for row in rows:
-        grouped[(str(row["mode"]), int(row["lx"]))].append(float(row[key]))
-    out: dict[str, tuple[list[int], list[float]]] = {}
-    for mode in MODES:
-        xs = sorted({lx for m, lx in grouped if m == mode})
-        ys = [float(np.mean(grouped[(mode, lx)])) for lx in xs]
-        out[mode] = (xs, ys)
-    return out
+def _series(rows: list[dict[str, object]], key: str) -> list[Series]:
+    bands = median_band(rows, group_key="mode", x_key="lx", value_key=key, group_order=MODES)
+    return [
+        Series(
+            label=mode.replace("_", " "),
+            x=[float(v) for v in xs], y=med, ylow=lo, yhigh=hi,
+            color=PALETTE[mode], marker=MARKERS[mode],
+        )
+        for mode, (xs, med, lo, hi) in bands.items()
+    ]
 
 
 def make_plot(rows: list[dict[str, object]], fig_path: str) -> None:
-    panels: list[Panel] = []
-    for title, key, ylabel, yscale in [
-        ("error accumulation", "rel_error", "column surrogate error", "log"),
-        ("column cost", "runtime_s", "runtime (s)", "linear"),
-    ]:
-        series = grouped_mean(rows, key)
-        panels.append(
-            Panel(
-                title=title,
-                xlabel="Lx",
-                ylabel=ylabel,
-                yscale=yscale,
-                series=[
-                    Series(
-                        label=mode.replace("_", " "),
-                        x=[float(v) for v in xs],
-                        y=ys,
-                        color=PALETTE[mode],
-                        marker=MARKERS[mode],
-                    )
-                    for mode, (xs, ys) in series.items()
-                ],
-            )
-        )
+    panels = [
+        Panel("error accumulation", "Lx", "column surrogate error", "log", _series(rows, "rel_error")),
+        Panel("column cost", "Lx", "runtime (s)", "linear", _series(rows, "runtime_s")),
+    ]
     write_line_panels(fig_path, panels, width=820, height=420)
 
 
@@ -114,10 +100,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--d", type=int, default=2)
     parser.add_argument("--p", type=int, default=2)
     parser.add_argument("--lx-values", type=int, nargs="+", default=[2, 4, 6, 8, 10])
-    parser.add_argument("--trials", type=int, default=3)
-    parser.add_argument("--ensemble", choices=["ring", "noisy_ring", "gaussian"], default="noisy_ring")
+    parser.add_argument("--trials", type=int, default=10)
+    parser.add_argument(
+        "--ensemble",
+        choices=["ring", "noisy_ring", "gaussian", "powerlaw", "expdecay"],
+        default="noisy_ring",
+    )
     parser.add_argument("--noise", type=float, default=1e-4)
     parser.add_argument("--decay", type=float, default=0.92)
+    parser.add_argument("--spectrum-param", type=float, default=1.0, help="alpha (powerlaw) or xi (expdecay)")
     parser.add_argument("--oversample", type=int, default=6)
     parser.add_argument("--n-power", type=int, default=1)
     parser.add_argument("--sketch", choices=["gaussian", "rademacher", "countsketch"], default="gaussian")

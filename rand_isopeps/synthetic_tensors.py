@@ -9,7 +9,7 @@ import scipy.linalg as la
 
 from .tn_shapes import MosesDims
 
-EnsembleKind = Literal["ring", "noisy_ring", "gaussian"]
+EnsembleKind = Literal["ring", "noisy_ring", "gaussian", "powerlaw", "expdecay"]
 
 
 def rng_from_seed(seed: int | None = None) -> np.random.Generator:
@@ -147,12 +147,33 @@ def add_relative_noise(
     return tensor + sigma * tensor_norm * noise / noise_norm
 
 
+def make_controlled_local(
+    dims: MosesDims,
+    rng: np.random.Generator,
+    decay_kind: Literal["exp", "power"] = "power",
+    parameter: float = 1.0,
+    complex_valued: bool = True,
+) -> np.ndarray:
+    """Local tensor whose first-SVD matrix has a prescribed singular decay.
+
+    Stress ensemble: no exact low rank, so the randomized SVD must cope with a
+    slowly decaying spectrum (power law ``s_j ~ (j+1)^-alpha`` or exponential
+    ``s_j ~ exp(-j/xi)``). ``parameter`` is alpha (power) or xi (exp).
+    """
+    mat, _ = make_controlled_spectrum_matrix(
+        dims.n1, dims.n2 * dims.n3, rng, decay=decay_kind, parameter=parameter,
+        complex_valued=complex_valued,
+    )
+    return mat.reshape(dims.tensor_shape)
+
+
 def make_local_tensor(
     dims: MosesDims,
     rng: np.random.Generator,
     ensemble: EnsembleKind = "noisy_ring",
     noise: float = 1e-4,
     decay: float = 0.92,
+    spectrum_param: float = 1.0,
 ) -> np.ndarray:
     if ensemble == "ring":
         return make_local_ring_exact(dims, rng, decay=decay)
@@ -163,6 +184,10 @@ def make_local_tensor(
         tensor = random_complex(dims.tensor_shape, rng)
         norm = np.linalg.norm(tensor)
         return tensor / norm if norm else tensor
+    if ensemble in ("powerlaw", "expdecay"):
+        kind = "power" if ensemble == "powerlaw" else "exp"
+        base = make_controlled_local(dims, rng, decay_kind=kind, parameter=spectrum_param)
+        return add_relative_noise(base, noise, rng) if noise > 0 else base
     raise ValueError(f"unknown ensemble: {ensemble}")
 
 

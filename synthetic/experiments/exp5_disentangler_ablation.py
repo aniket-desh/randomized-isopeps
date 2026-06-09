@@ -26,7 +26,6 @@ runtime) and a spectrum figure (sigma_i with vs without the disentangler).
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 from pathlib import Path
 import sys
 
@@ -34,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
-from rand_isopeps.disentangler import cut_spectrum
+from rand_isopeps.aggregate import median_band
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.local_methods import METHODS, run_method
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
@@ -58,6 +57,9 @@ def _run_eta_trial(task: tuple[argparse.Namespace, int, int]) -> list[dict[str, 
     with with_blas_threads(args.blas_threads):
         dims = MosesDims(chi=args.chi, eta=eta, d=args.d, p=args.p)
         b = _tensor(args, dims, trial)
+        # warm BLAS for these sizes; the median over trials also absorbs the
+        # one-time pymanopt import cost paid on the first Riemannian call.
+        run_method("A_two_svd", b, dims, rng=np.random.default_rng(0))
         rows: list[dict[str, object]] = []
         for idx, method in enumerate(METHODS):
             rng = np.random.default_rng(args.seed + 17 * trial + 100 * eta + idx)
@@ -93,43 +95,25 @@ def run(args: argparse.Namespace) -> tuple[str, str, str]:
     return csv_path, fig_path, spectrum_path
 
 
-def mean_by_eta(rows: list[dict[str, object]], key: str) -> dict[str, tuple[list[int], list[float]]]:
-    grouped: dict[tuple[str, int], list[float]] = defaultdict(list)
-    for row in rows:
-        value = float(row[key])
-        if np.isnan(value):
-            continue
-        grouped[(str(row["method"]), int(row["eta"]))].append(value)
-    out: dict[str, tuple[list[int], list[float]]] = {}
-    for method in METHODS:
-        etas = sorted({eta for m, eta in grouped if m == method})
-        values = [float(np.mean(grouped[(method, eta)])) for eta in etas]
-        if etas:
-            out[method] = (etas, values)
-    return out
+def _series(rows: list[dict[str, object]], key: str) -> list[Series]:
+    bands = median_band(rows, group_key="method", x_key="eta", value_key=key, group_order=METHODS)
+    return [
+        Series(
+            label=method.replace("_", " "),
+            x=[float(v) for v in xs], y=med, ylow=lo, yhigh=hi,
+            color=METHOD_STYLE[method][0], marker=METHOD_STYLE[method][1],
+        )
+        for method, (xs, med, lo, hi) in bands.items()
+    ]
 
 
 def make_methods_plot(rows: list[dict[str, object]], fig_path: str) -> None:
     panels = [
-        ("reconstruction error", "rel_error", "relative error", "log"),
-        ("second-SVD tail", "tail_used", "discarded energy (>eta)", "log"),
-        ("method cost", "runtime_s", "runtime (s)", "log"),
+        Panel("reconstruction error", "eta", "relative error", "log", _series(rows, "rel_error")),
+        Panel("second-SVD tail", "eta", "discarded energy (>eta)", "log", _series(rows, "tail_used")),
+        Panel("method cost", "eta", "runtime (s)", "log", _series(rows, "runtime_s")),
     ]
-    out_panels: list[Panel] = []
-    for title, key, ylabel, yscale in panels:
-        series_map = mean_by_eta(rows, key)
-        out_panels.append(Panel(
-            title=title, xlabel="eta", ylabel=ylabel, yscale=yscale,
-            series=[
-                Series(
-                    label=method.replace("_", " "),
-                    x=[float(v) for v in etas], y=values,
-                    color=METHOD_STYLE[method][0], marker=METHOD_STYLE[method][1],
-                )
-                for method, (etas, values) in series_map.items()
-            ],
-        ))
-    write_line_panels(fig_path, out_panels, width=1180, height=440)
+    write_line_panels(fig_path, panels, width=1180, height=440)
 
 
 def make_spectrum_plot(args: argparse.Namespace, fig_path: str) -> None:
@@ -163,7 +147,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--etas", type=int, nargs="+", default=[3, 4, 5, 6])
     parser.add_argument("--d", type=int, default=2)
     parser.add_argument("--p", type=int, default=2)
-    parser.add_argument("--trials", type=int, default=3)
+    parser.add_argument("--trials", type=int, default=8)
     parser.add_argument("--entangle", type=float, default=1.0, help="hidden bond-rotation strength in [0,1]")
     parser.add_argument("--noise", type=float, default=1e-6)
     parser.add_argument("--oversample", type=int, default=6)

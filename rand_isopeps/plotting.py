@@ -95,6 +95,8 @@ class Series:
     y: list[float]
     color: str
     marker: str = "o"
+    ylow: list[float] | None = None  # optional lower band (e.g. 25th percentile)
+    yhigh: list[float] | None = None  # optional upper band (e.g. 75th percentile)
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,7 @@ class Panel:
     ylabel: str
     yscale: Literal["linear", "log"]
     series: list[Series]
+    vlines: list[float] | None = None  # optional vertical reference lines (e.g. k1, k2)
 
 
 def _log_span_decades(panel: Panel) -> float:
@@ -159,16 +162,29 @@ def write_line_panels(
     # Stable legend order across panels: first-seen label wins.
     legend: dict[str, Line2D] = {}
 
+    log_axis = {id(panel): (panel.yscale == "log" and _log_span_decades(panel) >= 1.0) for panel in panels}
+
     for ax, panel in zip(axes, panels):
+        is_log = log_axis[id(panel)]
         for s in panel.series:
-            pairs = list(zip(s.x, s.y))
-            if panel.yscale == "log":
-                pairs = [(x, y) for x, y in pairs if y is not None and y > 0]
-            if not pairs:
+            has_band = s.ylow is not None and s.yhigh is not None
+            lows = s.ylow if has_band else [None] * len(s.x)
+            highs = s.yhigh if has_band else [None] * len(s.x)
+            rows = list(zip(s.x, s.y, lows, highs))
+            if is_log:
+                rows = [r for r in rows if r[1] is not None and r[1] > 0]
+            if not rows:
                 continue
-            xs = [p[0] for p in pairs]
-            ys = [p[1] for p in pairs]
+            xs = [r[0] for r in rows]
+            ys = [r[1] for r in rows]
             marker = _MARKER_ALIASES.get(s.marker, s.marker)
+            if has_band:
+                los = [r[2] for r in rows]
+                his = [r[3] for r in rows]
+                if is_log:
+                    # keep the band strictly positive so it renders on a log axis
+                    los = [max(lo, y * 1e-3) for lo, y in zip(los, ys)]
+                ax.fill_between(xs, los, his, color=s.color, alpha=0.15, linewidth=0, zorder=1)
             (line,) = ax.plot(
                 xs,
                 ys,
@@ -181,12 +197,15 @@ def write_line_panels(
             )
             legend.setdefault(s.label, line)
 
+        for xv in panel.vlines or []:
+            ax.axvline(xv, color="#888888", linestyle="--", linewidth=0.8, zorder=2)
+
         ax.set_title(panel.title, pad=8, loc="left")
         ax.set_xlabel(panel.xlabel, labelpad=4)
         ax.set_ylabel(panel.ylabel, labelpad=5)
         ax.margins(x=0.08, y=0.10)
 
-        if panel.yscale == "log" and _log_span_decades(panel) >= 1.0:
+        if is_log:
             ax.set_yscale("log")
             ax.yaxis.set_major_locator(LogLocator(base=10.0))
             ax.grid(True, which="major", axis="both", color="#e6e6e6", linewidth=0.7)
