@@ -8,11 +8,11 @@ from collections import defaultdict
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
-from rand_isopeps.io_utils import timestamp_slug, write_csv
+from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.mpo_mps_absorb import run_absorption_case
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
 from rand_isopeps.plotting import MARKERS, PALETTE, Panel, Series, write_line_panels
@@ -57,8 +57,7 @@ def run(args: argparse.Namespace) -> tuple[str, str]:
     rows = flatten(run_parallel(_run_absorption_task, tasks, workers))
 
     stamp = timestamp_slug()
-    csv_path = f"outputs/data/exp3-absorption-{stamp}.csv"
-    fig_path = f"outputs/figures/exp3-absorption-{stamp}.pdf"
+    csv_path, fig_path = output_paths(__file__, f"exp3-absorption-{stamp}")
     write_csv(csv_path, rows)
     make_plot(rows, fig_path)
     return csv_path, fig_path

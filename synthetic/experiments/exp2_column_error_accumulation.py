@@ -8,12 +8,12 @@ from collections import defaultdict
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
 from rand_isopeps.column_moses import run_column_moses_surrogate
-from rand_isopeps.io_utils import timestamp_slug, write_csv
+from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.local_ring_decomp import LocalMode
 from rand_isopeps.parallel import auto_worker_count, run_parallel, with_blas_threads
 from rand_isopeps.plotting import MARKERS, PALETTE, Panel, Series, write_line_panels
@@ -61,8 +61,7 @@ def run(args: argparse.Namespace) -> tuple[str, str]:
     rows = run_parallel(_run_column_task, tasks, workers)
 
     stamp = timestamp_slug()
-    csv_path = f"outputs/data/exp2-column-{stamp}.csv"
-    fig_path = f"outputs/figures/exp2-column-{stamp}.pdf"
+    csv_path, fig_path = output_paths(__file__, f"exp2-column-{stamp}")
     write_csv(csv_path, rows)
     make_plot(rows, fig_path)
     return csv_path, fig_path

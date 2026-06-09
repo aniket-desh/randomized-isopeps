@@ -1,5 +1,0 @@
-method,l_sites,phys_dim,mps_bond,mpo_bond,target_bond,rel_error_exact,runtime_s,peak_product_bond,final_max_bond,chi,eta,d,p,trial,oversample,n_power,sketch
-zipup_svd,6,4,4,4,4,0.024519884661156992,0.0011480419780127704,16,4,4,4,2,2,0,4,1,countsketch
-randomized,6,4,4,4,4,0.025123208856286026,0.002521499991416931,16,4,4,4,2,2,0,4,1,countsketch
-zipup_svd,6,4,6,4,6,0.024952015203013888,0.002298499981407076,24,6,4,6,2,2,0,4,1,countsketch
-randomized,6,4,6,4,6,0.025748114850993056,0.0017303329659625888,24,6,4,6,2,2,0,4,1,countsketch

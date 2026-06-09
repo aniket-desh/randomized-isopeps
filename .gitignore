@@ -1,0 +1,20 @@
+# local research notes (repo-wide, kept out of the published history)
+/briefing.md
+/log.md
+
+# reference papers (kept locally, not published)
+/docs/
+
+# generated experiment results (regenerable; recreated on each run)
+**/outputs/data/
+**/outputs/figures/
+
+# python
+__pycache__/
+*.py[cod]
+
+# matplotlib scratch config written next to experiment outputs
+.mplconfig/
+
+# macOS
+.DS_Store

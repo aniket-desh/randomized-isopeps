@@ -7,11 +7,11 @@ import argparse
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
-from rand_isopeps.io_utils import timestamp_slug, write_csv
+from rand_isopeps.io_utils import experiment_suite_dir, timestamp_slug, write_csv
 from rand_isopeps.randomized_svd import isometry_defect_columns
 from rand_isopeps.synthetic_tensors import random_complex, random_orthonormal_columns
 
@@ -43,7 +43,7 @@ def run(args: argparse.Namespace) -> str:
             }
         )
     stamp = timestamp_slug()
-    csv_path = f"outputs/data/exp4-tiny-isometry-{stamp}.csv"
+    csv_path = str(experiment_suite_dir(__file__) / "outputs" / "data" / f"exp4-tiny-isometry-{stamp}.csv")
     write_csv(csv_path, rows)
     return csv_path
 
