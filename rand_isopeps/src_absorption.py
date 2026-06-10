@@ -107,15 +107,12 @@ def src_absorb(
     Exactly one of ``target_bond`` (fixed output bond) or ``cutoff`` (adaptive
     truncation) should be given; ``target_bond`` takes precedence. ``incremental``
     selects ``random_contraction_inc`` and uses the C++ incremental-QR extension
-    when built (build_incrementalqr.sh), else a pure-Python QR. NOTE: the
-    incremental variant is reliable only on the fixed-rank path (``target_bond``);
-    its adaptive ``cutoff`` path has an upstream sketch-concatenation bug, so for
-    adaptive truncation use the default ``random_contraction`` (pure numpy).
+    when built (build_incrementalqr.sh), else a pure-Python QR. Both the fixed-rank
+    and adaptive-cutoff paths are supported (the upstream adaptive-path slice bug is
+    patched in the vendored contraction.py).
     SRC draws Gaussian sketches from the global numpy RNG, so the state is seeded
     and restored here for reproducibility without disturbing the caller's RNG.
     """
-    if incremental and target_bond is None:
-        raise ValueError("incremental SRC supports only fixed-rank target_bond; use incremental=False for cutoff")
     h = our_mpo_to_camano(mpo)
     psi = our_mps_to_camano(mps)
     if target_bond is not None:

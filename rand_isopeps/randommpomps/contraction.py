@@ -501,7 +501,13 @@ def random_contraction_inc(
                 if errorcount == 0:
                     qr = IncrementalQR(sketch, use_cpp_if_available=cpp)
                 else:
-                    qr.append(sketch[:, current_sketchdim:sketches_complete])
+                    # (vendored patch) upstream had the slice bounds reversed
+                    # (current_sketchdim:sketches_complete), an empty slice, so the
+                    # incremental QR never received the newly sketched columns on the
+                    # last site -- get_q() then returned fewer columns than
+                    # current_sketchdim, leaving cap.shape[0] < cap_dim and crashing the
+                    # next site's sketch concatenation. Matches the j != n-1 branch below.
+                    qr.append(sketch[:, sketches_complete:current_sketchdim])
             else:
                 if errorcount == 0:
                     temp = sketch[:, :, sketches_complete:current_sketchdim].reshape(cap_dim * visible_dim, -1)
