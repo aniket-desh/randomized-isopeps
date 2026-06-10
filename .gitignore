@@ -14,6 +14,11 @@
 __pycache__/
 *.py[cod]
 
+# compiled extensions / build artifacts (rebuild via build_incrementalqr.sh)
+*.so
+*.dylib
+rand_isopeps/randommpomps/build/
+
 # matplotlib scratch config written next to experiment outputs
 .mplconfig/
 

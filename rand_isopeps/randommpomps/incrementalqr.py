@@ -4,19 +4,19 @@ import scipy as sp
 import sys
 import os 
 
-#Adjust as needed
-# (vendored) do not override BLAS threads globally
-
-
-#Adjust locally 
-# (vendored) C++ build path removed; Python fallback is used
-
+# (vendored) do not override BLAS threads globally.
+# The optional pybind11 extension, when built (see build_incrementalqr.sh), lives
+# inside this package as libincrementalqr*.so, so import it as a package-relative
+# submodule first, then fall back to a top-level import, then to pure Python.
 try:
-    from libincrementalqr import setup, add_cols, extract_q, get_error_estimate
+    from .libincrementalqr import setup, add_cols, extract_q, get_error_estimate
     libincrementalqr_available = True
-except Exception as e:
-
-    libincrementalqr_available = False
+except Exception:
+    try:
+        from libincrementalqr import setup, add_cols, extract_q, get_error_estimate
+        libincrementalqr_available = True
+    except Exception:
+        libincrementalqr_available = False
 
 def complex_to_real(A):
     rows, cols = A.shape

@@ -16,8 +16,11 @@ Patches applied while vendoring (no algorithmic changes):
   imports without those heavy/optional dependencies (the numpy SRC routines
   ``random_contraction`` / ``random_contraction_inc`` do not use torch).
 - ``incrementalqr`` no longer mutates the global OMP/OPENBLAS thread counts or
-  appends a C++ build path on import; the pure-Python incremental QR fallback is
-  used unless the optional C++ extension is present.
+  appends a C++ build path on import; it imports the optional C++ extension as a
+  package-relative submodule (``libincrementalqr``) and otherwise falls back to a
+  pure-Python incremental QR. Build the C++ extension with
+  ``bash rand_isopeps/randommpomps/build_incrementalqr.sh`` (needs pybind11 +
+  OpenBLAS); ``incrementalqr.cpp`` is the vendored source.
 
 Note: the upstream repository did not include a license file at the time of
 vendoring. This copy is kept for local research use only.
