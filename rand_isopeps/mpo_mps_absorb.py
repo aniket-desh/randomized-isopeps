@@ -11,7 +11,9 @@ import numpy as np
 from .randomized_svd import SketchKind, rsvd_truncate, svd_truncate
 from .synthetic_tensors import random_complex
 
-CompressionMethod = Literal["zipup_svd", "randomized"]
+# "src" routes to the vendored successive-randomized-compression code
+# (rand_isopeps.src_absorption). It is selectable but not in the default methods.
+CompressionMethod = Literal["zipup_svd", "randomized", "src"]
 
 
 @dataclass
@@ -165,18 +167,29 @@ def run_absorption_case(
 
     rows: list[AbsorptionResult] = []
     for method in methods:
-        t0 = perf_counter()
-        compressed = compress_mps(
-            product,
-            max_bond=target_bond,
-            method=method,
-            oversample=oversample,
-            n_power=n_power,
-            sketch=sketch,
-            rng=rng,
-        )
-        runtime = perf_counter() - t0
-        approx = mps_to_vector(compressed)
+        if method == "src":
+            # Successive randomized compression: contract H@psi directly without
+            # ever forming the inflated `product` MPS. Vendored from RandomMPOMPS.
+            from .src_absorption import src_absorb
+
+            res = src_absorb(mpo, mps, target_bond=target_bond, seed=(seed or 0) + 9973)
+            runtime = res.runtime_s
+            approx = res.vector
+            final_bond = res.final_max_bond
+        else:
+            t0 = perf_counter()
+            compressed = compress_mps(
+                product,
+                max_bond=target_bond,
+                method=method,
+                oversample=oversample,
+                n_power=n_power,
+                sketch=sketch,
+                rng=rng,
+            )
+            runtime = perf_counter() - t0
+            approx = mps_to_vector(compressed)
+            final_bond = max_mps_bond(compressed)
         rows.append(
             AbsorptionResult(
                 method=method,
@@ -188,7 +201,7 @@ def run_absorption_case(
                 rel_error_exact=relative_vector_error(exact, approx),
                 runtime_s=runtime,
                 peak_product_bond=peak_product_bond,
-                final_max_bond=max_mps_bond(compressed),
+                final_max_bond=final_bond,
             )
         )
     return rows
