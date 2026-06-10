@@ -143,32 +143,41 @@ sequential Moses Move.
 
 ## Experiment 3 — R-column absorption (MPO–MPS compression)
 
-**Goal.** Compare deterministic **zip-up SVD** against **randomized local SVD** for
-compressing the residual column absorbed into the neighbor. A synthetic MPO is applied to
-an MPS, forming a product MPS with inflated bond $D_{\mathrm{prod}}=D_{\mathrm{MPO}}D_{\mathrm{MPS}}$,
-which is then compressed; error is measured against the exact product,
+**Goal.** Compare three ways to absorb the residual column into the neighbor:
+
+- **zip-up SVD** — form the product MPS (inflated bond $D_{\mathrm{prod}}=D_{\mathrm{MPO}}D_{\mathrm{MPS}}$) then compress it with a deterministic local-SVD sweep;
+- **randomized** — same product, but each local compression is a randomized SVD;
+- **SRC** — *successive randomized compression* (Camaño–Epperly–Tropp, arXiv:2504.06475, vendored under `rand_isopeps/randommpomps/`), which sketches the product **site-by-site and never forms the inflated bond**.
+
+Error is measured against the exact product,
 
 $$
 \epsilon_{\mathrm{absorb}} = \frac{\lVert (RC)_{\mathrm{exact}} - (RC)_{\mathrm{compressed}}\rVert_2}{\lVert (RC)_{\mathrm{exact}}\rVert_2}.
 $$
 
-Sweep $\eta\in\{4,6,8,10\}$ (MPS/target bond) at $L=8$ sites, $\chi=4$, 15 trials.
+Sweep $\eta\in\{4,6,8,10\}$ (MPS/target bond) at $L=8$ sites, $\chi=4$, 12 trials. All three
+compress to the same target bond $\eta$.
 
 ![exp3](figures/exp3-absorption.png)
 
 **Results.**
 
-- **Error is statistically identical** between zip-up and randomized,
-  $\epsilon_{\mathrm{absorb}}\approx 2.8\text{–}3.0\times10^{-2}$, with heavily overlapping
-  bands. The excess-error panel confirms randomized adds only $\sim 10^{-4}$ over zip-up
-  (a fraction of a percent of the truncation error), growing slowly with $\eta$.
-- **Timing crosses over with $\eta$.** On tiny cases ($\eta=4$) randomized carries sketch
-  overhead and is slower; by $\eta=10$ randomized **beats** zip-up (median, with separated
-  bands). The trend favors randomization as bonds grow, but the absolute sizes here are too
-  small to claim a robust speedup.
+- **zip-up and randomized are statistically identical**, $\epsilon_{\mathrm{absorb}}\approx
+  2.8\text{–}3.0\times10^{-2}$, with overlapping bands; randomized's excess over zip-up is only
+  $\sim 10^{-4}$. Randomized's timing crosses below zip-up's by $\eta=10$.
+- **SRC is the fastest at larger $\eta$** — by $\eta=10$ it runs in roughly half the time of
+  zip-up — precisely because it never builds the inflated product MPS (peak bond
+  $D_{\mathrm{prod}}$).
+- **SRC trades a little accuracy for that.** At a fixed target bond $\eta$ (no oversampling)
+  its error is $\sim 5\text{–}8\times10^{-2}$, i.e. a $\sim 2.5\text{–}5\times10^{-2}$ excess over
+  zip-up that grows with $\eta$. This is expected: SRC approximates the product from a rank-$\eta$
+  sketch rather than truncating the *exact* product, so at equal rank it is less accurate. The
+  win is asymptotic memory/scaling (avoiding $D_{\mathrm{prod}}$), not fixed-rank accuracy.
 
-**Caveat.** This is *not yet SRC*: it materializes the inflated product bond. Avoiding that
-intermediate via successive randomized / Khatri–Rao compression is the flagged next step.
+**Notes.** SRC accuracy is recoverable with oversampling or an adaptive cutoff (then it should
+track zip-up while still avoiding the product bond) — not tuned here. The sizes remain small, so
+read these as trends. SRC is now wired into the experiment (`--methods`/default includes it); the
+earlier "not yet SRC" caveat is resolved.
 
 ---
 
@@ -206,8 +215,9 @@ spectrum-dependent**: the stress sweep (exp1, power-law decay) and the spectrum 
 second-cut spectrum no longer decays quickly past $k_2$. The cases are deliberately tiny, so
 timing wins are real *in trend* but not to be over-interpreted.
 
-The open frontiers are (i) a true **SRC-style absorption** that avoids the inflated product
-bond; (ii) **power iterations / the disentangler** to recover accuracy under slow spectra;
+The open frontiers are (i) **tuning SRC** (oversampling / adaptive cutoff) so the
+product-bond-free absorption matches zip-up accuracy — SRC itself is now implemented and in
+exp3; (ii) **power iterations / the disentangler** to recover accuracy under slow spectra;
 (iii) a **true sequential Moses-Move carrier** (the column experiment is still a
 product-column surrogate); and (iv) the **disentangler** before the second SVD — the gauge
 choice that makes the second truncation itself less destructive, explored in `exp5` below.

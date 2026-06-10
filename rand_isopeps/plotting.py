@@ -33,6 +33,7 @@ PALETTE = {
     "rand_both": "#cc79a7",    # reddish purple
     "zipup_svd": "#0072b2",
     "randomized": "#d55e00",
+    "src": "#009e73",          # bluish green
 }
 
 # Series name -> matplotlib marker code.
@@ -43,6 +44,7 @@ MARKERS = {
     "rand_both": "D",
     "zipup_svd": "o",
     "randomized": "s",
+    "src": "^",
 }
 
 # Accept both the legacy descriptive names and matplotlib codes.

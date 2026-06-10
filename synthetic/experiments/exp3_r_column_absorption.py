@@ -18,7 +18,8 @@ from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with
 from rand_isopeps.plotting import MARKERS, PALETTE, Panel, Series, write_line_panels
 
 
-METHODS = ("zipup_svd", "randomized")
+METHODS = ("zipup_svd", "randomized", "src")
+EXCESS_METHODS = ("randomized", "src")  # excess error is measured against zip-up
 
 
 def _run_absorption_task(task: tuple[argparse.Namespace, int, int]) -> list[dict[str, object]]:
@@ -32,6 +33,7 @@ def _run_absorption_task(task: tuple[argparse.Namespace, int, int]) -> list[dict
             mps_bond=eta,
             mpo_bond=args.chi,
             target_bond=eta,
+            methods=METHODS,
             oversample=args.oversample,
             n_power=args.n_power,
             sketch=args.sketch,
@@ -87,7 +89,7 @@ def make_plot(rows: list[dict[str, object]], fig_path: str) -> None:
     panels = [
         Panel("R-column absorption", "eta", "compression runtime (s)", "linear", _series(rows, "runtime_s", METHODS)),
         Panel("compression error", "eta", "error vs exact product", "log", _series(rows, "rel_error_exact", METHODS)),
-        Panel("excess error vs zip-up", "eta", "rel error (rand - zipup)", "linear", _series(rows, "excess_error", ("randomized",))),
+        Panel("excess error vs zip-up", "eta", "rel error (method - zipup)", "linear", _series(rows, "excess_error", EXCESS_METHODS)),
     ]
     write_line_panels(fig_path, panels, width=1180, height=440)
 
