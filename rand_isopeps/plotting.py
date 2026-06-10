@@ -97,6 +97,10 @@ class Series:
     marker: str = "o"
     ylow: list[float] | None = None  # optional lower band (e.g. 25th percentile)
     yhigh: list[float] | None = None  # optional upper band (e.g. 75th percentile)
+    linestyle: str = "-"
+    # marker subsampling for dense curves: int step or (offset, step) tuple so
+    # overlapping series can stagger their markers. None marks every point.
+    markevery: int | tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -190,6 +194,8 @@ def write_line_panels(
                 ys,
                 color=s.color,
                 marker=marker,
+                markevery=s.markevery,
+                linestyle=s.linestyle,
                 markeredgecolor="white",
                 label=s.label,
                 clip_on=False,

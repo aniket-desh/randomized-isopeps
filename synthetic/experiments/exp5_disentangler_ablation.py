@@ -125,17 +125,21 @@ def make_spectrum_plot(args: argparse.Namespace, fig_path: str) -> None:
     no_d = run_method("A_two_svd", b, dims, rng=rng)
     with_d = run_method("B_disentangle_riem", b, dims)
 
-    def _series(label, spectrum, color, marker):
+    def _series(label, spectrum, color, marker, linestyle, offset):
         s = np.asarray(spectrum, dtype=float)
         idx = np.arange(1, s.shape[0] + 1)
-        return Series(label=label, x=[float(i) for i in idx], y=[float(v) for v in s], color=color, marker=marker)
+        step = max(1, s.shape[0] // 10)  # sparse, staggered markers so the curves stay legible
+        return Series(
+            label=label, x=[float(i) for i in idx], y=[float(v) for v in s],
+            color=color, marker=marker, linestyle=linestyle, markevery=(offset % step, step),
+        )
 
     panel = Panel(
         title=f"second-SVD spectrum (chi={args.chi}, eta={eta})",
         xlabel="singular index i", ylabel="singular value", yscale="log",
         series=[
-            _series("no disentangler", no_d.spectrum_no_d, "#0072b2", "o"),
-            _series("with disentangler", with_d.spectrum_used, "#009e73", "^"),
+            _series("no disentangler", no_d.spectrum_no_d, "#0072b2", "o", "-", 0),
+            _series("with disentangler", with_d.spectrum_used, "#009e73", "^", "--", 1),
         ],
     )
     write_line_panels(fig_path, [panel], width=560, height=440)

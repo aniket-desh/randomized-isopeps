@@ -33,11 +33,11 @@ from rand_isopeps.tn_shapes import MosesDims
 
 # ensemble -> (color, marker)
 _STYLE = {
-    "ring": ("#0072b2", "o"),
-    "noisy_ring": ("#009e73", "^"),
-    "gaussian": ("#d55e00", "s"),
-    "powerlaw": ("#cc79a7", "D"),
-    "expdecay": ("#e69f00", "v"),
+    "ring": ("#0072b2", "o", "-"),
+    "noisy_ring": ("#009e73", "^", "--"),
+    "gaussian": ("#d55e00", "s", "-."),
+    "powerlaw": ("#cc79a7", "D", ":"),
+    "expdecay": ("#e69f00", "v", (0, (3, 1, 1, 1))),
 }
 
 
@@ -56,13 +56,18 @@ def _spectra(dims: MosesDims, ensemble: str, args: argparse.Namespace, offset: i
     return s1 / s1[0], s2 / s2[0]
 
 
-def _series(name: str, spectrum: np.ndarray) -> Series:
-    color, marker = _STYLE.get(name, ("#999999", "o"))
+def _series(name: str, spectrum: np.ndarray, offset: int) -> Series:
+    color, marker, linestyle = _STYLE.get(name, ("#999999", "o", "-"))
     idx = np.arange(1, spectrum.shape[0] + 1)
+    # sparse, staggered markers (~10 per curve) so dense overlapping spectra stay
+    # legible instead of merging into blobs; distinct line styles disambiguate the
+    # flat noise-floor tails where every ensemble overlaps.
+    step = max(1, spectrum.shape[0] // 10)
     return Series(
         label=name.replace("_", " "),
         x=[float(i) for i in idx], y=[float(v) for v in spectrum],
-        color=color, marker=marker,
+        color=color, marker=marker, linestyle=linestyle,
+        markevery=(offset % step, step),
     )
 
 
@@ -72,8 +77,8 @@ def run(args: argparse.Namespace) -> tuple[str, str]:
     first_series, second_series = [], []
     for offset, ensemble in enumerate(args.ensembles):
         s1, s2 = _spectra(dims, ensemble, args, offset)
-        first_series.append(_series(ensemble, s1))
-        second_series.append(_series(ensemble, s2))
+        first_series.append(_series(ensemble, s1, offset))
+        second_series.append(_series(ensemble, s2, offset))
         for cut, spectrum in (("first", s1), ("second", s2)):
             for i, val in enumerate(spectrum, start=1):
                 rows.append({**dims.as_dict(), "ensemble": ensemble, "cut": cut, "index": i, "sigma_norm": float(val)})
