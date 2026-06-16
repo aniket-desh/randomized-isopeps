@@ -34,6 +34,23 @@ so the second SVD is the dominant local cost and the strongest randomization tar
 (its kept rank $k_2=\eta$ can be far below both matrix dimensions, whereas for spin
 systems $d=2$ gives $n_1 = 2k_1$, leaving little room in the first SVD).
 
+**The dimensionless rank fraction.** Whether a randomized SVD has *room* to win is
+governed not by the spectrum alone but by the kept sketch size $\ell=k+s$
+(oversampling $s$) as a fraction of the smaller matrix dimension,
+
+$$
+\rho = \frac{\ell}{\min(m,n)} = \frac{k+s}{\min(m,n)}.
+$$
+
+For the first SVD $\min(m_1,n_1)=\chi\eta d$ usually, so $\rho_1\approx \tfrac1d +
+\tfrac{s}{\chi\eta d}\sim 1/d$: spin-$\tfrac12$ ($d=2$) keeps *half* the smaller
+dimension, and only larger local spaces ($d=3,4,6,\dots$) shrink $\rho_1$ enough for
+randomization to pay. For the second SVD $\rho_2\sim 1/\eta$, already small. This is
+the central axis below: a randomized SVD becomes worthwhile only when $\rho\ll1$, and
+for the first SVD that means **large $d$**, not spin-like $d$. Every sweep below
+therefore varies the physical dimension $d$ (faceted as grid rows), and the phase
+diagram (exp7) collapses all parameters onto $\rho$.
+
 The four local randomization **modes** compared throughout are: `det` (both SVDs exact),
 `rand_first` (randomized first SVD), `rand_second` (randomized second SVD), and
 `rand_both`. The default ensemble is `noisy_ring`: an exactly ring-compatible tensor plus
@@ -64,49 +81,57 @@ plus wall-clock time per stage.
 
 **Goal.** Within the local two-SVD decomposition, determine which SVD tolerates
 randomization without degrading reconstruction error or isometry, and where the speedup
-is. Sweep $\eta\in\{4,6,8,10\}$ at $\chi=4$, $d=2$, $p=2$, 15 trials, noise $\sigma=10^{-4}$.
+is — now **faceted over the physical dimension $d\in\{2,3,4,6\}$ (grid rows)** to test
+the $\rho_1\sim 1/d$ prediction. Sweep $\eta\in\{4,6,8,10,12\}$ at $\chi=4$, $p=1$, 12
+trials, noise $\sigma=10^{-4}$.
 
 ![exp1](figures/exp1-local.png)
 
 **Results (noisy-ring ensemble).**
 
-- **Accuracy is randomization-neutral.** Across all four modes the reconstruction error
-  sits at the injected noise floor, $\epsilon_B \approx 10^{-4}$, and both isometry defects
-  stay at machine precision, $\epsilon_{\mathrm{iso}} \approx 10^{-15}$. The excess-error
-  panel makes this sharp: randomization adds only $\sim 10^{-7}$ relative error (four orders
-  below the reconstruction error itself), and `rand_first`'s band straddles zero.
-- **The payoff is in the second SVD.** `rand_second`/`rand_both` cut the runtime by
-  $\sim 1.6\times$ at $\eta=10$ (median, with non-overlapping bands), exactly where
-  $k_2=\eta \ll \min(\eta n_2,\chi n_3)$. `rand_first` tracks deterministic — the warmup
-  removed the earlier nonmonotone cold-start artifact — matching the prediction that
-  $k_1 \approx n_1/2$ leaves little asymptotic room.
+- **Accuracy is randomization-neutral at every $d$.** Across all four modes the
+  reconstruction error sits at the noise floor ($\epsilon_B \approx 10^{-4}$) and the
+  excess-error column stays at $\sim 10^{-6}$–$10^{-7}$ (orders below $\epsilon_B$);
+  isometry defects stay at machine precision.
+- **The first-SVD payoff turns on with $d$.** This is the headline of the d-sweep: in the
+  $d=2$ row all four modes overlap in timing (randomizing the first SVD buys nothing,
+  $\rho_1\approx\tfrac12$), but by the $d=6$ row `rand_first`/`rand_both` pull *clearly
+  below* `det`/`rand_second` — once $\rho_1=1/d$ is small the first SVD becomes a real
+  randomization target (and at large $d$ it is also the dominant cost, $\propto d^2$).
+  `rand_second` keeps its second-SVD win throughout ($k_2=\eta\ll\min(\eta n_2,\chi n_3)$).
 
-**Takeaway.** Randomize the *second* local SVD; the first is not worth it.
+**Takeaway.** Randomize the *second* SVD always; randomize the *first* SVD too once
+$d$ is large (the spin-like $d=2$ case is exactly where the first SVD is not worth it).
 
 **Stress test (does it survive realistic spectra?).** Repeating the sweep on a power-law
-ensemble (singular values $s_j\sim (j+1)^{-0.7}$, no exact low rank) tells a more cautious
-story:
+ensemble (singular values $s_j\sim (j+1)^{-0.7}$, no exact low rank) flips which SVD is the
+*safe* target:
 
 ![exp1 stress](figures/exp1-local-stress.png)
 
-Here the rank-$\eta$ truncation is intrinsically lossy for *every* method
-($\epsilon_B\approx 0.7$), and the excess-error panel now shows randomizing the second SVD
-adds a **real $\sim 1\%$ excess error** over deterministic (while still being faster) —
-randomization is no longer free. So the second-SVD advantage is **spectrum-dependent**: it
-holds when the second-cut spectrum decays fast (the ring/noisy-ring regime) and degrades
-under slow decay. This is exactly what motivates power iterations and the disentangler.
+Here the rank-$\eta$ truncation is intrinsically lossy for every method
+($\epsilon_B\approx 0.53$–$0.6$), and the excess-error column now shows randomizing the
+*second* SVD adds a **real $\sim 0.5\%$ excess error** (slow second-cut spectrum) while
+`rand_first` stays at near-zero excess *and* is faster at large $d$. So under slow decay
+the **first** SVD is the safer randomization target — the opposite of the noisy-ring
+regime. The second-SVD advantage is spectrum-dependent (motivating the disentangler); the
+first-SVD advantage is dimension-dependent ($\rho_1\sim 1/d$).
 
-**Diagnostic — the SVD spectra (exp6).** A companion experiment plots the singular spectra
-entering each SVD, which explains the above:
+**Diagnostic — the SVD spectra (exp6, faceted by $d$).** A companion experiment plots the
+singular spectra entering each SVD, with one row per $d\in\{2,3,4,6,8\}$, which explains the
+above:
 
 ![exp6 spectra](figures/exp6-spectra.png)
 
-The **first SVD** keeps $k_1=\chi\eta$ of $n_1=\chi\eta d$ rows — for $d=2$ that is *half*
-the row space (dashed line), and for the gaussian/power-law ensembles the spectrum is still
-$O(1)$ there, so there is little for a randomized SVD to exploit. The **second SVD** keeps
-$k_2=\eta$: for the noisy ring the spectrum collapses right at $k_2$ (rank-$\eta$ truncation
-is near-lossless, randomization safe), whereas for gaussian and power-law it decays slowly
-past $k_2$ — the quantitative reason the stress case loses accuracy.
+The **first SVD** keeps $k_1=\chi\eta$ of $n_1=\chi\eta d$ rows, so the dashed $k_1$ line
+sits at fraction $1/d$ of the row space and **marches left as $d$ grows** (half at $d=2$,
+an eighth at $d=8$). For the noisy-ring / exp-decay ensembles the spectrum has already
+collapsed *before* $k_1$ at larger $d$ — there is finally room for a randomized first SVD —
+whereas for gaussian / power-law it stays $O(1)$ at $k_1$ at every $d$ (no room). The
+**second SVD** keeps $k_2=\eta$: for the noisy ring the spectrum collapses right at $k_2$
+(rank-$\eta$ truncation near-lossless, randomization safe), whereas for gaussian / power-law
+it decays slowly past $k_2$ — the quantitative reason the stress case loses accuracy. This
+is the visual mechanism behind $\rho_1\sim 1/d$.
 
 ---
 
@@ -215,12 +240,13 @@ spectrum-dependent**: the stress sweep (exp1, power-law decay) and the spectrum 
 second-cut spectrum no longer decays quickly past $k_2$. The cases are deliberately tiny, so
 timing wins are real *in trend* but not to be over-interpreted.
 
-The open frontiers are (i) **tuning SRC** (oversampling / adaptive cutoff) so the
-product-bond-free absorption matches zip-up accuracy — SRC itself is now implemented and in
-exp3; (ii) **power iterations / the disentangler** to recover accuracy under slow spectra;
-(iii) a **true sequential Moses-Move carrier** (the column experiment is still a
-product-column surrogate); and (iv) the **disentangler** before the second SVD — the gauge
-choice that makes the second truncation itself less destructive, explored in `exp5` below.
+Most of the frontiers raised here are now addressed below: (i) **tuning SRC** (oversampling /
+adaptive cutoff) is implemented and in exp3; (ii) the **disentangler** before the second SVD
+is explored in `exp5`; (iii) a **true sequential Moses-Move carrier** replaces the
+product-column surrogate in `exp11`; and (iv) the whole **first-vs-second / spectrum / $d$**
+question is reframed on the rank fraction $\rho$ in `exp7–11`. SRC oversampling/adaptive-cutoff
+tuning and product-structured (Khatri–Rao / TensorSketch) sketches for the second SVD remain
+the main open items.
 
 ---
 
@@ -259,8 +285,10 @@ by a hidden bond rotation, so a naive rank-$\eta$ truncation is lossy but a gaug
 The disentangler uses the closed-form **alternating minimization** (Algorithm 5: rank-$k$
 truncation then an orthogonal Procrustes update $Q=UV^\top$); the Riemannian path uses
 **pymanopt** on the special-orthogonal manifold with the closed-form gradient of Theorem 3.1.
-Run at $\chi=3$, $\eta\in\{3,4,5,6\}$, $p=2$, full bond rotation, noise $10^{-6}$, 8 trials
-(median + IQR band; the median also absorbs pymanopt's one-time import cost in the timing).
+Run at $\chi=3$, $\eta\in\{3,4,5,6,7\}$, $p=1$, full bond rotation, noise $10^{-6}$, 8 trials,
+now **faceted over $d\in\{2,3,4\}$** (grid rows). Because $d$ enters only the *first* SVD,
+the disentangler/second-SVD story is $d$-independent, and the rows confirm exactly that: A
+is lossy, B/C/D collapse the tail, B_riem reaches the noise floor, in every $d$ row.
 
 ![exp5 methods](figures/exp5-methods.png)
 
@@ -301,3 +329,132 @@ $$
 The disentangler is what makes the second truncation cheap *and* accurate; randomized SVD
 is then safe (C), and the search for the disentangler can itself be sketched (D) — the most
 promising randomized-NLA contribution in this pipeline.
+
+---
+
+# Stress-testing the first SVD: the rank-fraction story (exp7–11)
+
+The experiments above answer *which* SVD to randomize on spin-like $d=2$. The next five
+experiments stress that conclusion across physical dimension and the dimensionless rank
+fraction $\rho=(k+s)/\min(m,n)$ — i.e. they ask, honestly, **for what regimes (if any)
+does randomizing the first SVD become worthwhile?**
+
+## Experiment 7 — the rank-fraction phase diagram
+
+**Goal.** Collapse a large sweep — $\chi\in\{4,6,8\}$, $\eta\in\{6,10,16\}$,
+$d\in\{2,3,4,6,8,12,16\}$, oversample $\in\{2,6,12\}$, three ensembles, $p=1$ — onto the
+single axis $\rho$. Each point is a parameter group: $x=\rho$, $y=$ stage speedup
+(deterministic / randomized stage time), color $=\log_{10}$ excess error, marker $=$ SVD
+target. Rows are ensembles, columns are the two SVDs.
+
+![exp7 phase](figures/exp7-phase.png)
+
+**Results.**
+
+- **The first SVD only enters the useful region at small $\rho_1$ (large $d$).** SVD1 points
+  trace a clean downward trend: at high $\rho_1$ (right, $d=2$, $\rho_1\gtrsim\tfrac12$) the
+  speedup sits at/below 1, crossing above the $\text{speedup}=1$ line around
+  $\rho_1\approx 0.3$–$0.4$ (i.e. $d\gtrsim3$) and reaching $\sim5$–$8\times$ by
+  $\rho_1\approx0.05$ ($d=16$). There is no spectrum that rescues a high-$\rho_1$ first SVD —
+  the kept subspace is simply too large a fraction of the matrix.
+- **The second SVD lives in the useful frontier.** SVD2 points cluster at low $\rho_2$ and
+  speedups of $\sim5$–$20\times$ (per-stage), exactly the low-$\rho$/high-speedup corner.
+- **Color shows the accuracy caveat.** Under the power-law ensemble the SVD2 points turn
+  yellow-green ($\sim10^{-2}$ excess), the slow-spectrum penalty of exp1; SVD1 excess stays
+  low. The phase diagram thus separates *room to win* (the $\rho$ axis) from *safety* (color).
+
+This is the sharpest statement of the thesis: **a randomized SVD is worthwhile only when
+$\rho\ll1$; for the first SVD that requires large $d$, not spin-like $d$.**
+
+## Experiment 8 — minimum time-to-accuracy (the fairest test)
+
+**Goal.** Fixing one oversample/power setting is unfair to randomization. For each tensor
+and randomized mode, sweep $s\in\{0,2,4,8,16\}$ and $q\in\{0,1,2\}$ and report the *fastest
+configuration whose reconstruction error is within $1.05\times$ deterministic* (with
+isometry defects $<10^{-10}$); $1.01\times$ is also recorded. Plotted: best valid total
+speedup vs $\eta$, faceted $d\times$ ensemble.
+
+![exp8 time-to-accuracy](figures/exp8-tta.png)
+
+**Results.** After fair tuning, `rand_first`/`rand_both` climb from a modest $\sim1.3\times$
+at $d=2$ to $\sim3\times$ by $d=6$ — because at large $d$ the first SVD is the dominant cost
+($\propto d^2$) *and* is accurate to tune. `rand_second`'s *total* speedup is modest
+($\sim1$–$1.5\times$) precisely because it only accelerates the second stage while the
+deterministic first SVD still dominates the total at small $d$. So the fairest possible test
+agrees with exp7: **for spin-like $d=2$–$4$, randomizing the first SVD gives only a small
+time-to-accuracy edge; the edge grows with $d$.**
+
+## Experiment 9 — SVD1 microbenchmark (algorithm vs overhead)
+
+**Goal.** Is the weak $d=2$ first-SVD gain *algorithmic* ($\rho_1$ too large) or just
+Python/reshape overhead? Strip the tensor code: benchmark only the first matrix
+$B_{(1),(23)}$, deterministic vs randomized, with the randomized time broken into stages
+(sketch $A\Omega$, range QR, power iterations, projected SVD, reconstruction), sweeping $d$.
+
+![exp9 microbenchmark](figures/exp9-svd1bench.png)
+
+**Results.** On the isolated matrix the randomized total drops *further* below deterministic
+as $d$ grows (the gap widens to $\sim2\times$ by $d=16$), while `rand_error` tracks
+`det_error` throughout. The stage breakdown shows the power-iteration and projected-SVD
+passes dominate. So the weak gain at $d=2$ is **dimensional, not implementation overhead** —
+confirming exp7/exp8 at the bare-matrix level.
+
+## Experiment 10 — does randomizing SVD1 pollute the disentangler?
+
+**Goal.** The first SVD does not only create reconstruction error — it produces the residual
+$\widetilde V$ that the disentangler then optimizes over (choosing $Q$ to shrink the
+rank-$k_2$ tail of $\mathbf A(Q\widetilde V)$). So a randomized first SVD perturbs the *input
+to the gauge problem*. Compare four pipelines on the disentanglable ensemble:
+`exact1+D+exact2`, `rand1+D+exact2`, `exact1+sketchD+exact2`, `exact1+D+rand2`; record
+reconstruction error, second-SVD tail $\tau_2^2=\sum_{i>\eta}\sigma_i^2$, alt-min iterations,
+gauge/isometry defects, runtime (faceted by $d$).
+
+![exp10 downstream](figures/exp10-downstream.png)
+
+**Results.** All four pipelines lie **on top of one another** in both reconstruction error and
+second-SVD tail, across every $d$ and $\eta$ (overlapping bands), with matching gauge
+iteration counts. A randomized first SVD does **not** pollute the downstream disentangler —
+the gauge search reaches the same tail and the same accuracy whether $\widetilde V$ came from
+an exact or a randomized first SVD. So `rand_first` is safe to combine with disentanglement;
+its only liability remains its weak economics at small $d$ (exp7), not downstream damage.
+
+## Experiment 11 — true recursive upward-carrier column Moses Move
+
+**Goal.** Replace the exp2 *product-column surrogate* (independent locals) with a genuine
+sequential carrier: the residual from each row is carried into the next row before its
+decomposition, so errors compound through an *actual carried tensor*. The column is a
+vertical MPS of height $L_x$ with bond $\eta$ and physical leg $d$; each Moses step is a
+two-stage split mirroring the local two SVDs (SVD1 isometry extraction, $\rho_1\sim1$; SVD2
+rank-$\eta$ bond compression $=$ the carrier passed up), so the four modes are exercised on
+the carried column. The final column error is computed **exactly** by MPS transfer-matrix
+overlaps (no exponential materialization). `flat` = lossy stress; `decay` = easy.
+
+![exp11 carrier (flat)](figures/exp11-carrier-flat.png)
+
+**Results (flat / stress).** The column error compounds with $L_x$ and saturates near $O(1)$
+once truncation is lossy; the carried tail fraction and carrier conditioning grow mildly with
+$L_x$. Critically, **all four modes overlap exactly** — randomization is accuracy-neutral
+*through the true recursive carrier*, not just on independent locals. (`decay` ensemble: same
+overlap, column error two-to-eight orders smaller.) This closes the briefing's open "task 5":
+the sequential carrier confirms the surrogate's stability conclusion holds under genuine
+upward absorption.
+
+---
+
+## Consolidated thesis (exp1–11)
+
+$$
+\boxed{\text{Randomize a Moses-Move SVD when its rank fraction } \rho=(k+s)/\min(m,n)\ll1.}
+$$
+
+- The **second** SVD always satisfies this ($\rho_2\sim1/\eta$): randomize it — safely when
+  the (disentangled) second-cut spectrum decays, with a real $\sim$1% penalty under slow
+  decay (exp1 stress, exp7 color).
+- The **first** SVD satisfies it **only for large physical dimension** ($\rho_1\sim1/d$):
+  for spin-like $d=2$–$4$ randomizing it is weak in time-to-accuracy (exp8) and the
+  microbenchmark shows that is dimensional, not overhead (exp9); by $d\gtrsim6$ it becomes
+  both fast and the dominant cost (exp1, exp7). It is *safe* everywhere — accuracy-neutral
+  (exp1), harmless to the downstream disentangler (exp10), and stable through the true
+  recursive carrier (exp11) — its only liability is economics at small $\rho_1$.
+- **Disentanglement** improves the spectrum so the second truncation is cheap *and* accurate,
+  and the gauge search itself can be sketched (exp5).

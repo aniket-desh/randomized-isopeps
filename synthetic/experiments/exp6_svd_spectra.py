@@ -27,7 +27,7 @@ import scipy.linalg as la
 
 from rand_isopeps.disentangler import cut_forward
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
-from rand_isopeps.plotting import Panel, Series, write_line_panels
+from rand_isopeps.plotting import Panel, Series, write_panel_grid
 from rand_isopeps.synthetic_tensors import make_local_tensor
 from rand_isopeps.tn_shapes import MosesDims
 
@@ -71,9 +71,8 @@ def _series(name: str, spectrum: np.ndarray, offset: int) -> Series:
     )
 
 
-def run(args: argparse.Namespace) -> tuple[str, str]:
-    dims = MosesDims(chi=args.chi, eta=args.eta, d=args.d, p=args.p)
-    rows: list[dict[str, object]] = []
+def _row_panels(dims: MosesDims, args: argparse.Namespace, rows: list[dict[str, object]]) -> list[Panel]:
+    """First- and second-SVD spectrum panels for one physical dimension d."""
     first_series, second_series = [], []
     for offset, ensemble in enumerate(args.ensembles):
         s1, s2 = _spectra(dims, ensemble, args, offset)
@@ -82,8 +81,7 @@ def run(args: argparse.Namespace) -> tuple[str, str]:
         for cut, spectrum in (("first", s1), ("second", s2)):
             for i, val in enumerate(spectrum, start=1):
                 rows.append({**dims.as_dict(), "ensemble": ensemble, "cut": cut, "index": i, "sigma_norm": float(val)})
-
-    panels = [
+    return [
         Panel(
             f"first SVD spectrum (keep k1={dims.k1} of n1={dims.n1})",
             "singular index i", "sigma_i / sigma_1", "log", first_series, vlines=[float(dims.k1)],
@@ -93,10 +91,25 @@ def run(args: argparse.Namespace) -> tuple[str, str]:
             "singular index i", "sigma_i / sigma_1", "log", second_series, vlines=[float(dims.k2)],
         ),
     ]
+
+
+def run(args: argparse.Namespace) -> tuple[str, str]:
+    rows: list[dict[str, object]] = []
+    # rows = d, columns = (first SVD spectrum, second SVD spectrum). The first
+    # column makes the d story visual: the dashed k1 line sits at fraction
+    # k1/n1 = 1/d of the row space, marching left as d grows -- exactly the room
+    # a randomized first SVD has to exploit.
+    grid = [_row_panels(MosesDims(chi=args.chi, eta=args.eta, d=d, p=args.p), args, rows) for d in args.ds]
+
     stamp = timestamp_slug()
     csv_path, fig_path = output_paths(__file__, f"exp6-spectra-{stamp}")
     write_csv(csv_path, rows)
-    write_line_panels(fig_path, panels, width=900, height=440)
+    write_panel_grid(
+        fig_path, grid,
+        row_titles=[f"d={d}" for d in args.ds],
+        col_titles=["first SVD spectrum (k1 dashed)", "second SVD spectrum (k2 dashed)"],
+        cell_width=480, cell_height=320,
+    )
     return csv_path, fig_path
 
 
@@ -104,8 +117,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--chi", type=int, default=4)
     parser.add_argument("--eta", type=int, default=8)
-    parser.add_argument("--d", type=int, default=2)
-    parser.add_argument("--p", type=int, default=2)
+    parser.add_argument("--ds", type=int, nargs="+", default=[2, 3, 4, 6, 8],
+                        help="physical dimensions to facet over (k1/n1 = 1/d)")
+    parser.add_argument("--p", type=int, default=1)
     parser.add_argument(
         "--ensembles", nargs="+",
         default=["noisy_ring", "gaussian", "powerlaw", "expdecay"],
@@ -118,6 +132,7 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.quick:
         args.ensembles = ["noisy_ring", "gaussian"]
+        args.ds = [2, 4]
         args.eta = min(args.eta, 6)
     return args
 

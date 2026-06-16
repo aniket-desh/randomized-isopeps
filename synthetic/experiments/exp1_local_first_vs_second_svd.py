@@ -26,7 +26,7 @@ from rand_isopeps.aggregate import median_band
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.local_ring_decomp import LocalMode, local_ring_decomp
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
-from rand_isopeps.plotting import MARKERS, PALETTE, Panel, Series, write_line_panels
+from rand_isopeps.plotting import MARKERS, PALETTE, Panel, Series, write_panel_grid
 from rand_isopeps.synthetic_tensors import make_local_tensor
 from rand_isopeps.tn_shapes import MosesDims
 
@@ -34,12 +34,19 @@ from rand_isopeps.tn_shapes import MosesDims
 MODES: tuple[LocalMode, ...] = ("det", "rand_first", "rand_second", "rand_both")
 RAND_MODES: tuple[LocalMode, ...] = ("rand_first", "rand_second", "rand_both")
 
+# columns of the faceted grid: (metric, ylabel, yscale, modes shown, title)
+COLUMNS = (
+    ("total_time_s", "runtime (s)", "linear", MODES, "local two-svd timing"),
+    ("rel_error", "relative reconstruction error", "log", MODES, "reconstruction error"),
+    ("excess_error", "rel error (rand - det)", "linear", RAND_MODES, "excess error vs det"),
+)
 
-def _run_eta_trial(task: tuple[argparse.Namespace, int, int]) -> list[dict[str, object]]:
-    args, eta, trial = task
+
+def _run_trial(task: tuple[argparse.Namespace, int, int, int]) -> list[dict[str, object]]:
+    args, d, eta, trial = task
     with with_blas_threads(args.blas_threads):
-        dims = MosesDims(chi=args.chi, eta=eta, d=args.d, p=args.p)
-        base_rng = np.random.default_rng(args.seed + 1000 * eta + trial)
+        dims = MosesDims(chi=args.chi, eta=eta, d=d, p=args.p)
+        base_rng = np.random.default_rng(args.seed + 100000 * d + 1000 * eta + trial)
         tensor = make_local_tensor(
             dims,
             base_rng,
@@ -90,13 +97,16 @@ def _run_eta_trial(task: tuple[argparse.Namespace, int, int]) -> list[dict[str, 
 
 def run(args: argparse.Namespace) -> tuple[str, str]:
     workers = auto_worker_count(args.workers)
-    tasks = [(args, eta, trial) for eta in args.etas for trial in range(args.trials)]
-    rows = flatten(run_parallel(_run_eta_trial, tasks, workers))
+    tasks = [
+        (args, d, eta, trial)
+        for d in args.ds for eta in args.etas for trial in range(args.trials)
+    ]
+    rows = flatten(run_parallel(_run_trial, tasks, workers))
 
     stamp = timestamp_slug()
     csv_path, fig_path = output_paths(__file__, f"exp1-local-{stamp}")
     write_csv(csv_path, rows)
-    make_plot(rows, fig_path)
+    make_plot(rows, fig_path, args.ds)
     return csv_path, fig_path
 
 
@@ -112,21 +122,34 @@ def _series(rows, key, modes):
     ]
 
 
-def make_plot(rows: list[dict[str, object]], fig_path: str) -> None:
-    panels = [
-        Panel("local two-svd timing", "eta", "runtime (s)", "linear", _series(rows, "total_time_s", MODES)),
-        Panel("reconstruction error", "eta", "relative reconstruction error", "log", _series(rows, "rel_error", MODES)),
-        Panel("excess error vs det", "eta", "rel error (rand - det)", "linear", _series(rows, "excess_error", RAND_MODES)),
+def make_plot(rows: list[dict[str, object]], fig_path: str, ds: list[int]) -> None:
+    """Faceted grid: one row per physical dimension d, columns of metrics.
+
+    The d axis is the point: rho1 = k1/n1 ~ 1/d shrinks as d grows, so the
+    first-SVD ``rand_first`` curve only pulls away from ``det`` in the larger-d
+    rows -- the spin-like d=2 row is where randomizing the first SVD buys least.
+    """
+    grid = [
+        [
+            Panel(title, "eta", ylabel, yscale, _series([r for r in rows if int(r["d"]) == d], key, modes))
+            for key, ylabel, yscale, modes, title in COLUMNS
+        ]
+        for d in ds
     ]
-    write_line_panels(fig_path, panels, width=1180, height=440)
+    write_panel_grid(
+        fig_path, grid,
+        row_titles=[f"d={d}" for d in ds],
+        col_titles=[title for *_, title in COLUMNS],
+    )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--chi", type=int, default=4)
-    parser.add_argument("--etas", type=int, nargs="+", default=[4, 6, 8, 10])
-    parser.add_argument("--d", type=int, default=2)
-    parser.add_argument("--p", type=int, default=2)
+    parser.add_argument("--etas", type=int, nargs="+", default=[4, 6, 8, 10, 12])
+    parser.add_argument("--ds", type=int, nargs="+", default=[2, 3, 4, 6],
+                        help="physical dimensions to facet over (rho1 ~ 1/d)")
+    parser.add_argument("--p", type=int, default=1)
     parser.add_argument("--trials", type=int, default=12)
     parser.add_argument(
         "--ensemble",
@@ -146,6 +169,7 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.quick:
         args.etas = [4, 6]
+        args.ds = [2, 4]
         args.trials = 3
         args.oversample = 4
         args.workers = 1

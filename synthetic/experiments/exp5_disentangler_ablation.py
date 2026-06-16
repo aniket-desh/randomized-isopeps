@@ -37,7 +37,7 @@ from rand_isopeps.aggregate import median_band
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.local_methods import METHODS, run_method
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
-from rand_isopeps.plotting import Panel, Series, write_line_panels
+from rand_isopeps.plotting import Panel, Series, write_panel_grid
 from rand_isopeps.synthetic_tensors import make_disentanglable_local
 from rand_isopeps.tn_shapes import MosesDims
 
@@ -46,16 +46,23 @@ _COLORS = ["#0072b2", "#d55e00", "#009e73", "#cc79a7", "#e69f00", "#56b4e9", "#9
 _MARKERS = ["o", "s", "^", "D", "v", "P", "X"]
 METHOD_STYLE = {m: (_COLORS[i % len(_COLORS)], _MARKERS[i % len(_MARKERS)]) for i, m in enumerate(METHODS)}
 
+# columns of the methods grid: (metric, ylabel, yscale, title)
+METHOD_COLUMNS = (
+    ("rel_error", "relative error", "log", "reconstruction error"),
+    ("tail_used", "discarded energy (>eta)", "log", "second-SVD tail"),
+    ("runtime_s", "runtime (s)", "log", "method cost"),
+)
+
 
 def _tensor(args: argparse.Namespace, dims: MosesDims, trial: int) -> np.ndarray:
-    rng = np.random.default_rng(args.seed + 1000 * dims.eta + trial)
+    rng = np.random.default_rng(args.seed + 100000 * dims.d + 1000 * dims.eta + trial)
     return make_disentanglable_local(dims, rng, entangle=args.entangle, noise=args.noise)
 
 
-def _run_eta_trial(task: tuple[argparse.Namespace, int, int]) -> list[dict[str, object]]:
-    args, eta, trial = task
+def _run_trial(task: tuple[argparse.Namespace, int, int, int]) -> list[dict[str, object]]:
+    args, d, eta, trial = task
     with with_blas_threads(args.blas_threads):
-        dims = MosesDims(chi=args.chi, eta=eta, d=args.d, p=args.p)
+        dims = MosesDims(chi=args.chi, eta=eta, d=d, p=args.p)
         b = _tensor(args, dims, trial)
         # warm BLAS for these sizes; the median over trials also absorbs the
         # one-time pymanopt import cost paid on the first Riemannian call.
@@ -83,14 +90,17 @@ def _run_eta_trial(task: tuple[argparse.Namespace, int, int]) -> list[dict[str, 
 
 def run(args: argparse.Namespace) -> tuple[str, str, str]:
     workers = auto_worker_count(args.workers)
-    tasks = [(args, eta, trial) for eta in args.etas for trial in range(args.trials)]
-    rows = flatten(run_parallel(_run_eta_trial, tasks, workers))
+    tasks = [
+        (args, d, eta, trial)
+        for d in args.ds for eta in args.etas for trial in range(args.trials)
+    ]
+    rows = flatten(run_parallel(_run_trial, tasks, workers))
 
     stamp = timestamp_slug()
     csv_path, fig_path = output_paths(__file__, f"exp5-disentangler-{stamp}")
     spectrum_path = fig_path.replace("exp5-disentangler-", "exp5-spectrum-")
     write_csv(csv_path, rows)
-    make_methods_plot(rows, fig_path)
+    make_methods_plot(rows, fig_path, args.ds)
     make_spectrum_plot(args, spectrum_path)
     return csv_path, fig_path, spectrum_path
 
@@ -107,25 +117,34 @@ def _series(rows: list[dict[str, object]], key: str) -> list[Series]:
     ]
 
 
-def make_methods_plot(rows: list[dict[str, object]], fig_path: str) -> None:
-    panels = [
-        Panel("reconstruction error", "eta", "relative error", "log", _series(rows, "rel_error")),
-        Panel("second-SVD tail", "eta", "discarded energy (>eta)", "log", _series(rows, "tail_used")),
-        Panel("method cost", "eta", "runtime (s)", "log", _series(rows, "runtime_s")),
+def make_methods_plot(rows: list[dict[str, object]], fig_path: str, ds: list[int]) -> None:
+    """Faceted grid: one row per d. The disentangler/second-SVD story is largely
+    d-independent (d only enters the first SVD), so the rows show the conclusions
+    are robust across physical dimension."""
+    grid = [
+        [
+            Panel(title, "eta", ylabel, yscale, _series([r for r in rows if int(r["d"]) == d], key))
+            for key, ylabel, yscale, title in METHOD_COLUMNS
+        ]
+        for d in ds
     ]
-    write_line_panels(fig_path, panels, width=1180, height=440)
+    write_panel_grid(
+        fig_path, grid,
+        row_titles=[f"d={d}" for d in ds],
+        col_titles=[title for *_, title in METHOD_COLUMNS],
+    )
 
 
-def make_spectrum_plot(args: argparse.Namespace, fig_path: str) -> None:
+def _spectrum_panel(args: argparse.Namespace, d: int) -> Panel:
     """Singular spectrum entering the second SVD, with vs without disentangler."""
     eta = max(args.etas)
-    dims = MosesDims(chi=args.chi, eta=eta, d=args.d, p=args.p)
+    dims = MosesDims(chi=args.chi, eta=eta, d=d, p=args.p)
     b = _tensor(args, dims, trial=0)
     rng = np.random.default_rng(args.seed)
     no_d = run_method("A_two_svd", b, dims, rng=rng)
     with_d = run_method("B_disentangle_riem", b, dims)
 
-    def _series(label, spectrum, color, marker, linestyle, offset):
+    def _s(label, spectrum, color, marker, linestyle, offset):
         s = np.asarray(spectrum, dtype=float)
         idx = np.arange(1, s.shape[0] + 1)
         step = max(1, s.shape[0] // 10)  # sparse, staggered markers so the curves stay legible
@@ -134,23 +153,33 @@ def make_spectrum_plot(args: argparse.Namespace, fig_path: str) -> None:
             color=color, marker=marker, linestyle=linestyle, markevery=(offset % step, step),
         )
 
-    panel = Panel(
-        title=f"second-SVD spectrum (chi={args.chi}, eta={eta})",
+    return Panel(
+        title=f"second-SVD spectrum (d={d}, eta={eta})",
         xlabel="singular index i", ylabel="singular value", yscale="log",
         series=[
-            _series("no disentangler", no_d.spectrum_no_d, "#0072b2", "o", "-", 0),
-            _series("with disentangler", with_d.spectrum_used, "#009e73", "^", "--", 1),
+            _s("no disentangler", no_d.spectrum_no_d, "#0072b2", "o", "-", 0),
+            _s("with disentangler", with_d.spectrum_used, "#009e73", "^", "--", 1),
         ],
     )
-    write_line_panels(fig_path, [panel], width=560, height=440)
+
+
+def make_spectrum_plot(args: argparse.Namespace, fig_path: str) -> None:
+    """One spectrum panel per d (single row)."""
+    grid = [[_spectrum_panel(args, d) for d in args.ds]]
+    write_panel_grid(
+        fig_path, grid,
+        col_titles=[f"second-SVD spectrum (d={d}, eta={max(args.etas)})" for d in args.ds],
+        cell_width=420, cell_height=400,
+    )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--chi", type=int, default=3)
-    parser.add_argument("--etas", type=int, nargs="+", default=[3, 4, 5, 6])
-    parser.add_argument("--d", type=int, default=2)
-    parser.add_argument("--p", type=int, default=2)
+    parser.add_argument("--etas", type=int, nargs="+", default=[3, 4, 5, 6, 7])
+    parser.add_argument("--ds", type=int, nargs="+", default=[2, 3, 4],
+                        help="physical dimensions to facet over (d enters only the first SVD here)")
+    parser.add_argument("--p", type=int, default=1)
     parser.add_argument("--trials", type=int, default=8)
     parser.add_argument("--entangle", type=float, default=1.0, help="hidden bond-rotation strength in [0,1]")
     parser.add_argument("--noise", type=float, default=1e-6)
@@ -166,6 +195,7 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.quick:
         args.etas = [3, 4]
+        args.ds = [2, 3]
         args.trials = 1
         args.oversample = 4
         args.dis_maxiter = 40

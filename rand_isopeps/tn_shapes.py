@@ -74,7 +74,30 @@ class MosesDims:
     def local_cost_model(self) -> int:
         return self.first_svd_cost_model + self.second_svd_cost_model
 
-    def as_dict(self) -> dict[str, int]:
+    # --- dimensionless rank fraction rho = ell / min(m, n) ---------------------
+    # The economics of a randomized SVD are governed by how large the kept
+    # sketch ell = k + oversample is relative to the smaller matrix dimension.
+    # For the first SVD rho1 ~ 1/d (spin systems keep ~half the rows when d=2);
+    # for the second SVD rho2 ~ 1/eta. Small rho is the regime where randomized
+    # SVD has room to win; this is the central axis of the phase diagram (exp7).
+
+    def matrix_shape(self, target: str) -> tuple[int, int]:
+        return self.first_svd_shape if target == "first" else self.second_svd_shape
+
+    def target_rank(self, target: str) -> int:
+        return self.k1 if target == "first" else self.k2
+
+    def rank_fraction(self, target: str, oversample: int = 0) -> float:
+        m, n = self.matrix_shape(target)
+        k = self.target_rank(target)
+        ell = min(k + oversample, m, n)
+        return ell / min(m, n)
+
+    def aspect(self, target: str) -> float:
+        m, n = self.matrix_shape(target)
+        return m / n
+
+    def as_dict(self) -> dict[str, float]:
         return {
             "chi": self.chi,
             "eta": self.eta,
@@ -92,6 +115,10 @@ class MosesDims:
             "first_cost_model": self.first_svd_cost_model,
             "second_cost_model": self.second_svd_cost_model,
             "local_cost_model": self.local_cost_model,
+            "rho1": self.rank_fraction("first"),
+            "rho2": self.rank_fraction("second"),
+            "aspect1": self.aspect("first"),
+            "aspect2": self.aspect("second"),
         }
 
 
