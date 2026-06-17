@@ -42,7 +42,7 @@ from dataclasses import dataclass
 import numpy as np
 import scipy.linalg as la
 
-from .randomized_svd import SketchKind, rsvd_truncate
+from .randomized_svd import SketchKind, SketchSpec, as_spec, rsvd_truncate
 from .tn_shapes import MosesDims
 
 
@@ -51,6 +51,13 @@ from .tn_shapes import MosesDims
 # These are pure permutations/reshapes (norm preserving). ``A`` groups the bond
 # legs so the cut matches the second SVD; ``A^{-1}`` undoes it. Mirrors
 # local_ring_decomp's ``v4.transpose(0, 2, 1, 3)`` reshape.
+#
+# Cross-checked against Dektor's reference (github.com/adektor/disentangle-python):
+# with X = vtilde.reshape(eta, chi, n2, n3), ``cut_forward`` is their
+# ``ten_to_mat(X, svd_legs=[0,2])`` and ``Q @ vtilde`` is their
+# ``Q @ ten_to_mat(X, dis_legs=[0,1])`` -- bit-identical, and the alt-min /
+# Euclidean-gradient below match their trunc_error optimizer to machine
+# precision (see log.md 2026-06-16).
 
 def cut_forward(vtilde: np.ndarray, dims: MosesDims) -> np.ndarray:
     """A(vtilde): map (k1, n2*n3) to the second-SVD matrix (eta*n2, chi*n3)."""
@@ -62,6 +69,22 @@ def cut_inverse(m: np.ndarray, dims: MosesDims) -> np.ndarray:
     """A^{-1}(m): map (eta*n2, chi*n3) back to (k1, n2*n3)."""
     m4 = m.reshape(dims.eta, dims.n2, dims.chi, dims.n3)
     return m4.transpose(0, 2, 1, 3).reshape(dims.k1, dims.n2 * dims.n3)
+
+
+def sketch_for_second_svd(kind: str, dims: MosesDims) -> "str | SketchSpec":
+    """Build the sketch argument for the second-SVD matrix ``M = A(vtilde)``.
+
+    Single source of truth for the structured-sketch parameters so the
+    correctness-critical Khatri-Rao factor order lives in one place: ``M``'s right
+    (column) index is the product ``chi*n3 = chi*(chi*eta)`` with ``chi`` outer and
+    ``n3`` inner, so the Khatri-Rao sketch *must* use ``factor_dims=(chi, n3)`` in
+    that order. ``"exact"`` and the simple kinds pass through unchanged.
+    """
+    if kind == "khatri_rao":
+        return SketchSpec("khatri_rao", factor_dims=(dims.chi, dims.n3), base="spherical")
+    if kind == "sparsestack":
+        return SketchSpec("sparsestack", zeta=4)
+    return kind  # "exact", "gaussian", "countsketch", "rademacher"
 
 
 # --- spectral diagnostics on the second-SVD matrix ---
@@ -93,6 +116,30 @@ def renyi_half_entropy(singular: np.ndarray) -> float:
     return float(2.0 * np.log(np.sum(np.sqrt(p))))
 
 
+# --- gauge diagnostics: the disentangler must stay an exact unitary/orthogonal ---
+#
+# The disentangler is a gauge: U1 V = (U1 Q^H)(Q V) holds *exactly* only when
+# Q^H Q = I. A sketched search may propose an approximate update, but the Q
+# actually inserted into the tensor network must be retracted to a unitary
+# (the Procrustes/polar step does this). These quantify how well that holds.
+
+def unitary_defect(q: np.ndarray) -> float:
+    """||Q^H Q - I||_F: distance of Q from the orthogonal/unitary group."""
+    gram = q.conj().T @ q
+    return float(np.linalg.norm(gram - np.eye(gram.shape[0], dtype=gram.dtype)))
+
+
+def gauge_defect(u1: np.ndarray, vtilde: np.ndarray, q: np.ndarray) -> float:
+    """Pre-truncation gauge error ||U1 V - (U1 Q^H)(Q V)||_F = ||U1 (Q^H Q - I) V||_F.
+
+    Bounded by ``unitary_defect(q) * ||V||_F`` when U1 is an isometry, so it is at
+    machine precision exactly when Q is. Zero (to roundoff) for Q = I.
+    """
+    k1 = q.shape[1]
+    inner = (q.conj().T @ q) - np.eye(k1, dtype=q.dtype)
+    return float(np.linalg.norm(u1 @ (inner @ vtilde)))
+
+
 @dataclass
 class DisentangleResult:
     q: np.ndarray  # optimized disentangler, shape (k1, k1)
@@ -100,6 +147,10 @@ class DisentangleResult:
     tail_initial: float  # tail energy at Q = I (no disentangler)
     tail_final: float  # tail energy at the optimized Q
     optimizer: str
+    # optional fields (appended with defaults; existing constructors unaffected)
+    converged: bool = True
+    sketch: str | None = None
+    extra: dict[str, float] | None = None  # accepted/rejected steps, surrogate tail, ...
 
 
 def _orthogonal_procrustes(c: np.ndarray) -> np.ndarray:
@@ -159,6 +210,115 @@ def disentangle_altmin(
     tail_final = tail_energy(la.svdvals(cut_forward(q @ x, dims)), k)
     label = "altmin" if sketch is None else f"altmin-sketch-{sketch}"
     return DisentangleResult(q=q, iters=iters, tail_initial=tail0, tail_final=tail_final, optimizer=label)
+
+
+def disentangle_altmin_sketched(
+    vtilde: np.ndarray,
+    dims: MosesDims,
+    k: int | None = None,
+    maxiter: int = 50,
+    tol: float = 1e-10,
+    sketch: "SketchKind | SketchSpec" = "gaussian",
+    oversample: int = 8,
+    n_power: int = 1,
+    rng: np.random.Generator | None = None,
+    *,
+    fresh_sketch: bool = True,
+    validate: bool = True,
+    accept_tol: float = 0.0,
+    max_rejects: int = 5,
+) -> DisentangleResult:
+    """Validated sketched alternating-minimization disentangler.
+
+    Like :func:`disentangle_altmin` but the inner rank-``k`` truncation is a
+    randomized SVD, and -- crucially -- each Procrustes candidate is **accepted
+    only if it lowers the EXACT tail** ``c_k(Q) = sum_{i>k} sigma_i^2(A(QV))``
+    (``validate=True``). This validation is required, not optional: optimizing a
+    *fixed-sketch* surrogate over the manifold ``O(k1)`` is not covered by the
+    OSI/OSE guarantees (Camano-Epperly-Meyer-Tropp). Those bounds are
+    per-*fixed*-subspace -- once ``Q`` is chosen as a function of the realized
+    sketch the quantifier order is reversed, the continuum ``O(k1)`` defeats any
+    union bound, and the sketch surrogate can be driven down while the true
+    ``c_k`` stalls or rises. Accepting only on the exact tail makes the kept
+    sequence exactly non-increasing in the true objective regardless of sketch
+    noise (the approximate-monotonicity argument, with exact validation).
+
+    ``fresh_sketch=True`` draws an independent sketch each iteration (the
+    held-out-sketch mitigation); ``fresh_sketch=False`` freezes one sketch (the
+    overfitting-stress mode). ``validate=False`` accepts every candidate (also a
+    stress mode). The returned ``Q`` is always exactly unitary (Procrustes/polar).
+    """
+    k = dims.k2 if k is None else k
+    x = vtilde
+    k1 = x.shape[0]
+    q = np.eye(k1, dtype=x.dtype)
+    gen = np.random.default_rng() if rng is None else rng
+    spec = as_spec(sketch)
+    # frozen-sketch mode: reuse the SAME sketch draw every iteration
+    frozen_seed = None if fresh_sketch else int(gen.integers(0, 2**31 - 1))
+
+    def _exact_tail(qq: np.ndarray) -> float:
+        return tail_energy(la.svdvals(cut_forward(qq @ x, dims)), k)
+
+    tail0 = _exact_tail(q)
+    c_cur = tail0
+    surrogate = float("nan")
+    accepted = rejected = consecutive_rejects = 0
+    converged = False
+    iters = 0
+    for iters in range(1, maxiter + 1):
+        y = cut_forward(q @ x, dims)
+        inner_rng = np.random.default_rng(frozen_seed) if frozen_seed is not None else gen
+        res = rsvd_truncate(y, k, oversample=oversample, n_power=n_power, rng=inner_rng, sketch=spec)
+        mk = (res.u * res.s) @ res.vh
+        q_cand = _orthogonal_procrustes(cut_inverse(mk, dims) @ x.conj().T)
+
+        if validate:
+            c_cand = _exact_tail(q_cand)
+            if c_cand <= c_cur - accept_tol:
+                delta = float(np.linalg.norm(q_cand - q))
+                q, c_cur = q_cand, c_cand
+                accepted += 1
+                consecutive_rejects = 0
+                if delta <= tol:
+                    converged = True
+                    break
+            else:
+                rejected += 1
+                consecutive_rejects += 1
+                if consecutive_rejects >= max_rejects:
+                    converged = True  # stalled at a (validated) local minimum
+                    break
+        else:  # unvalidated: accept everything (overfitting-stress mode)
+            delta = float(np.linalg.norm(q_cand - q))
+            q = q_cand
+            accepted += 1
+            if delta <= tol:
+                converged = True
+                break
+
+    tail_final = _exact_tail(q)
+    # Re-evaluate the sketch's tail estimate at the FINAL gauge so it pairs with
+    # tail_final (the in-loop ``surrogate`` was taken at the pre-Procrustes q, one
+    # step earlier). exact - surrogate is then the genuine sketch bias at q: a
+    # frozen sketch that has been overfit reports a low surrogate vs the high
+    # exact tail (positive bias).
+    y_final = cut_forward(q @ x, dims)
+    rng_final = np.random.default_rng(frozen_seed) if frozen_seed is not None else gen
+    res_final = rsvd_truncate(y_final, k, oversample=oversample, n_power=n_power, rng=rng_final, sketch=spec)
+    surrogate = float(np.linalg.norm(y_final - (res_final.u * res_final.s) @ res_final.vh) ** 2)
+    extra = {
+        "accepted": float(accepted),
+        "rejected": float(rejected),
+        "surrogate_final": surrogate,
+        "exact_minus_surrogate": tail_final - surrogate,
+        "unitary_defect": unitary_defect(q),
+    }
+    label = f"altmin-sketch-{spec.kind}{'' if validate else '-noval'}{'' if fresh_sketch else '-fixed'}"
+    return DisentangleResult(
+        q=q, iters=iters, tail_initial=tail0, tail_final=tail_final, optimizer=label,
+        converged=converged, sketch=spec.kind, extra=extra,
+    )
 
 
 def _euclidean_gradient_ck(q: np.ndarray, x: np.ndarray, dims: MosesDims, k: int) -> tuple[float, np.ndarray]:

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 import scipy.linalg as la
 
-SketchKind = Literal["gaussian", "rademacher", "countsketch"]
-
+# SketchKind / SketchSpec live in sketches.py (standalone, numpy-only). Re-export
+# SketchKind here so existing callers `from .randomized_svd import SketchKind`
+# keep working with the widened set (gaussian/rademacher/countsketch/sparsestack/
+# khatri_rao).
+from .sketches import SketchKind, SketchSpec, as_spec
+from .sketches import range_sample as _structured_range_sample
 
 @dataclass
 class SVDResult:
@@ -63,16 +66,22 @@ def _range_sample(
     a: np.ndarray,
     ell: int,
     rng: np.random.Generator,
-    sketch: SketchKind,
+    sketch: "SketchKind | SketchSpec",
 ) -> np.ndarray:
-    if sketch == "countsketch":
+    spec = as_spec(sketch)
+    # Keep the original gaussian/rademacher/countsketch fast paths byte-for-byte
+    # (exp1-11 depend on their exact RNG draw order); delegate only the new
+    # structured kinds to sketches.range_sample.
+    if spec.kind == "countsketch":
         buckets = rng.integers(0, ell, size=a.shape[1])
         signs = rng.choice(np.array([-1.0, 1.0]), size=a.shape[1])
         y = np.zeros((a.shape[0], ell), dtype=a.dtype)
         np.add.at(y, (slice(None), buckets), a * signs[None, :])
         return y
-    omega = _test_matrix(a.shape[1], ell, a.dtype, rng, sketch)
-    return a @ omega
+    if spec.kind in ("gaussian", "rademacher"):
+        omega = _test_matrix(a.shape[1], ell, a.dtype, rng, spec.kind)
+        return a @ omega
+    return _structured_range_sample(a, ell, rng, spec)
 
 
 def orthonormalize(a: np.ndarray) -> np.ndarray:
@@ -95,7 +104,7 @@ def rsvd_truncate(
     n_power: int = 1,
     seed: int | None = None,
     rng: np.random.Generator | None = None,
-    sketch: SketchKind = "gaussian",
+    sketch: "SketchKind | SketchSpec" = "gaussian",
 ) -> SVDResult:
     """Randomized SVD using the Halko-Martinsson-Tropp range finder.
 
@@ -125,7 +134,7 @@ def rsvd_truncate(
     b = q.conj().T @ a
     u_hat, s, vh = la.svd(b, full_matrices=False, check_finite=False, lapack_driver="gesdd")
     u = q @ u_hat
-    return SVDResult(u=u[:, :kk], s=s[:kk], vh=vh[:kk, :], method=f"rsvd-{sketch}")
+    return SVDResult(u=u[:, :kk], s=s[:kk], vh=vh[:kk, :], method=f"rsvd-{as_spec(sketch).kind}")
 
 
 def relative_frobenius_error(a: np.ndarray, approx: np.ndarray) -> float:

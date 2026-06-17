@@ -36,9 +36,12 @@ from .disentangler import (
     cut_inverse,
     cut_spectrum,
     disentangle_altmin,
+    disentangle_altmin_sketched,
     disentangle_riemannian,
+    gauge_defect,
     renyi_half_entropy,
     tail_energy,
+    unitary_defect,
 )
 from .randomized_svd import (
     SketchKind,
@@ -177,3 +180,72 @@ def run_method(
     b_hat = _reconstruct(u1_eff, (second.u * second.s) @ second.vh, dims)
     runtime = perf_counter() - t0
     return MethodResult(method, dims, b_hat, spectrum_no_d, spectrum_used, u1_eff, second.vh, runtime, dis.iters)
+
+
+# --- reusable first-SVD -> disentangle -> final-SVD2 pipeline (exp12/13/14) ----
+#
+# A thin composition of the existing primitives so the structured-sketch
+# experiments stay thin and share one code path. ``inner`` selects the
+# disentangler (``"exact"`` -> deterministic alt-min, else a sketch kind/spec
+# routed through the *validated* sketched alt-min); ``final`` selects the final
+# SVD2 (``"exact"`` -> deterministic, else a sketch kind/spec randomized SVD).
+
+
+@dataclass
+class PipelineResult:
+    dims: MosesDims
+    b_hat: np.ndarray
+    dis: object  # DisentangleResult
+    u1: np.ndarray  # pre-gauge first isometry
+    vtilde: np.ndarray  # pre-gauge residual
+    spectrum_used: np.ndarray  # singular values entering the (gauged) SVD2
+    second_vh: np.ndarray
+    runtime_s: float
+
+    def metrics(self, b: np.ndarray) -> dict[str, float | int]:
+        return {
+            "rel_error": relative_frobenius_error(b, self.b_hat),
+            "tail_used": tail_energy(self.spectrum_used, self.dims.k2),
+            "renyi_used": renyi_half_entropy(self.spectrum_used),
+            "unitary_defect": unitary_defect(self.dis.q),
+            "gauge_defect": gauge_defect(self.u1, self.vtilde, self.dis.q),
+            "second_iso_defect": isometry_defect_rows(self.second_vh),
+            "iters": self.dis.iters,
+            "runtime_s": self.runtime_s,
+        }
+
+
+def run_disentangle_pipeline(
+    b: np.ndarray,
+    dims: MosesDims,
+    inner="exact",
+    final="exact",
+    *,
+    oversample: int = 8,
+    n_power: int = 1,
+    dis_maxiter: int = 100,
+    fresh_sketch: bool = True,
+    validate: bool = True,
+    accept_tol: float = 0.0,
+    rng: np.random.Generator | None = None,
+) -> PipelineResult:
+    gen = np.random.default_rng() if rng is None else rng
+    t0 = perf_counter()
+    u1, vtilde = _first_svd(b, dims)
+    if inner == "exact":
+        dis = disentangle_altmin(vtilde, dims, maxiter=dis_maxiter, rng=gen)
+    else:
+        dis = disentangle_altmin_sketched(
+            vtilde, dims, maxiter=dis_maxiter, sketch=inner, oversample=oversample,
+            n_power=n_power, rng=gen, fresh_sketch=fresh_sketch, validate=validate,
+            accept_tol=accept_tol,
+        )
+    u1_eff = u1 @ dis.q.conj().T
+    m2 = cut_forward(dis.q @ vtilde, dims)
+    spectrum_used = la.svdvals(m2)
+    if final == "exact":
+        second = svd_truncate(m2, dims.k2)
+    else:
+        second = rsvd_truncate(m2, dims.k2, oversample=oversample, n_power=n_power, rng=gen, sketch=final)
+    b_hat = _reconstruct(u1_eff, (second.u * second.s) @ second.vh, dims)
+    return PipelineResult(dims, b_hat, dis, u1, vtilde, spectrum_used, second.vh, perf_counter() - t0)
