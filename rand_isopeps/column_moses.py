@@ -1,4 +1,10 @@
-"""synthetic column-level Moses Move accumulation experiments."""
+"""synthetic column-level Moses Move accumulation experiments.
+
+LEGACY / diagnostic: this is the *product-column surrogate* (independent locals,
+Kronecker product), used by exp2. The faithful sequential upward carrier in
+``column_carrier.py`` (exp11) supersedes it for any theoretical / accumulation
+claim; keep this only as the cheap first-pass surrogate.
+"""
 
 from __future__ import annotations
 

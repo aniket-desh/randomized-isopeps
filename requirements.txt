@@ -1,0 +1,14 @@
+# rand_isopeps dependencies.
+#
+# Core -- rand_isopeps core library + synthetic experiments exp1-14:
+numpy
+scipy
+matplotlib
+threadpoolctl
+
+# Optional extras (install as needed):
+#   pip install pymanopt          # Riemannian disentangler (exp5 B_riem, disentangle_riemannian)
+#   pip install quimb autoray     # real isoTNS Moses Move + TEBD2 (rand_isopeps/isotns.py, tebd.py, exp15)
+#
+# Vendored SRC (rand_isopeps/randommpomps/) needs only numpy; its optional C++
+# incremental-QR builds via rand_isopeps/randommpomps/build_incrementalqr.sh.

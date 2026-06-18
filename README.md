@@ -46,8 +46,10 @@ python3 synthetic/experiments/exp14_structured_final_svd2.py                  # 
 
 The **real** isoTNS Moses Move (not a synthetic kernel) lives in
 `rand_isopeps/isotns.py` (quimb-based, adapted from Dektor's `isoTNS_sampling`):
-the vertical carrier *and* the sideways R-column zip-up absorption, with every
-truncated SVD swappable for our randomized range finder via `RandSVD(sketch=...)`.
+the vertical carrier *and* the sideways R-column zip-up absorption. `RandSVD(sketch=...)`
+swaps the **local tensor-ring SVDs** (first SVD, disentangler search, second SVD)
+for our randomized range finder; the R-column zip-up absorption stays quimb's
+deterministic compress for now (a known insertion point, studied in exp3).
 
 ```bash
 python3 synthetic/experiments/exp15_real_moses_move.py   # det vs randomized SVD on the real Moses move

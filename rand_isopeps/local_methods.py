@@ -158,6 +158,10 @@ def run_method(
 
     # --- disentangler methods B / B_riem / C / D ---
     if method == "D_sketched_disentangle":
+        # NOTE: this is the *unvalidated* sketched alt-min (no exact-tail accept
+        # test). The validated version -- accept a step only if the exact tail
+        # drops -- is `disentangle_altmin_sketched`, used by exp12/13/14. exp5's D
+        # predates it and is kept as the unvalidated baseline.
         dis = disentangle_altmin(
             vtilde, dims, maxiter=dis_maxiter, sketch=sketch,
             oversample=oversample, n_power=n_power, rng=gen,

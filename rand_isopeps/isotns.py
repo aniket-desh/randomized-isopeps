@@ -7,9 +7,13 @@ absorption via ``tensor_network_1d_compress``) is kept on quimb; the single
 truncated-SVD primitive ``my_split`` and the alternating-minimization
 ``disentangle`` are rewritten so the SVD step runs through *our* numpy
 primitives (``rand_isopeps.randomized_svd``). Passing ``rand=RandSVD(...)``
-therefore swaps every SVD in the Moses Move (first SVD, second SVD, the
-disentangler search, and the R-column compression) for a randomized / structured
-sketch, with the gauge kept exact.
+swaps the **local tensor-ring SVDs** -- the first SVD, the disentangler-search
+SVD, and the second SVD -- for a randomized / structured sketch, with the gauge
+kept exact. NOTE: the sideways **R-column zip-up absorption** is still quimb's
+*deterministic* ``tensor_network_1d_compress`` (it is not threaded through
+``RandSVD``); it is a known randomization insertion point (the block-isoPEPS
+paper lists zip-up / variational / randomized-SVD options) studied synthetically
+in exp3, not yet wired into the real move.
 
 This replaces Dektor's ``my_split`` use of the private quimb internals
 ``tensor_core._SPLIT_FNS`` / ``_parse_split_opts`` (removed in quimb >= 1.14)
@@ -39,9 +43,11 @@ from .randomized_svd import SketchSpec, rsvd_truncate
 
 @dataclass
 class RandSVD:
-    """Randomization config threaded through the Moses Move. ``sketch=None`` is the
-    deterministic path (numpy SVD); otherwise every truncated SVD uses our
-    randomized range finder with the given sketch (a kind string or SketchSpec)."""
+    """Randomization config threaded through the Moses Move's *local tensor-ring*
+    SVDs (first SVD, disentangler search, second SVD). ``sketch=None`` is the
+    deterministic path (numpy SVD); otherwise those SVDs use our randomized range
+    finder with the given sketch (a kind string or SketchSpec). The R-column
+    zip-up absorption is NOT affected (it stays quimb's deterministic compress)."""
 
     sketch: "str | SketchSpec | None" = None
     oversample: int = 8
@@ -89,7 +95,10 @@ def my_split(T, left_inds, absorb, chi_max, cutoff=1e-10, get="tensors",
     array = np.asarray(TT.data).reshape(int(np.prod(left_dims)), int(np.prod(right_dims)))
 
     left, s, right = _raw_svd(array, chi_max, rand)
-    # discarded Frobenius weight at rank chi_max (works for full or randomized s)
+    # discarded Frobenius weight at rank chi_max. In deterministic mode ``s`` is
+    # the full spectrum so this is the exact rank-chi_max tail; in randomized mode
+    # ``s`` are the rsvd's approximate top-chi_max values, so this is an *estimate*
+    # of the residual (it under-counts what the sketch failed to capture).
     arr_norm2 = float(np.vdot(array, array).real)
     err = float(np.sqrt(max(arr_norm2 - float(np.sum(np.abs(s[:chi_max]) ** 2)), 0.0)))
 
@@ -127,7 +136,9 @@ def disentangle(X, dis_bonds, svd_bonds, eta, cutoff=1e-6, Ndis=30, rand=None):
     """
     dims = [X.ind_size(b) for b in dis_bonds]
     dim = qu.prod(dims)
-    eye = qu.eye(dim, dtype=float).reshape(list(dims) + list(dims))
+    # match the state dtype so the gauge is a complex unitary for complex states
+    # (the Procrustes update Q = U V below stays an exact unitary either way).
+    eye = qu.eye(dim, dtype=X.data.dtype).reshape(list(dims) + list(dims))
     bonds_out = [ix + "*" for ix in dis_bonds]
     Q = qtn.Tensor(data=eye, inds=list(dis_bonds) + bonds_out, tags=())
 

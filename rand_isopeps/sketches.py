@@ -28,6 +28,11 @@ Kinds:
   grouped product index such as the second-SVD right index ``chi*n3 =
   chi*(chi*eta)``. Use a **spherical** base: a Rademacher base has injectivity 0
   on the worst Kronecker subspace ("overwhelming orthogonality", sec. 5.3).
+  NOTE: ``Omega`` is materialized and applied as ``a @ Omega``, so this tests the
+  *distribution's* accuracy/safety, NOT a matvec speedup -- the structure-
+  exploiting matrix-free form (applying ``A Omega`` via tensor contractions
+  without forming ``Omega``) is future work. Do not claim a Khatri-Rao speedup
+  from this implementation.
 
 Only ``sparsestack`` and ``khatri_rao`` are routed here from ``rsvd_truncate``;
 the dense / countsketch fast paths stay native to ``randomized_svd`` so the

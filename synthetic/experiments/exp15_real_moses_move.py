@@ -3,11 +3,12 @@
 
 Unlike exp1-14 (synthetic numpy kernels), this runs the genuine block Moses Move
 on a quimb PEPS via ``rand_isopeps.isotns`` -- the vertical carrier *and* the
-sideways R-column zip-up absorption -- and swaps every truncated SVD (first SVD,
-disentangler search, second SVD, column compression) for our randomized range
-finder by passing ``RandSVD(sketch=...)``. It measures the represented-state
-error directly: 1 - |<psi0|psi>| after one Moses move on a column, where psi0 is
-the exact original PEPS (3x3 contracts exactly).
+sideways R-column zip-up absorption -- and swaps the **local tensor-ring SVDs**
+(first SVD, disentangler search, second SVD) for our randomized range finder by
+passing ``RandSVD(sketch=...)``. (The R-column zip-up absorption itself stays
+quimb's deterministic compress -- not yet randomized here.) It measures the
+represented-state error directly: 1 - |<psi0|psi>| after one Moses move on a
+column, where psi0 is the exact original PEPS (3x3 contracts exactly).
 
 Sweeps the vertical truncation bond eta (the lossy second cut; the source PEPS
 bond exceeds it) and compares deterministic vs gaussian / sparsestack /
