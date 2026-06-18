@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rand-isopeps"
+version = "0.1.0"
+description = "Randomized linear algebra inside the block Moses Move of isoPEPS / block-isoPEPS"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "threadpoolctl",
+]
+
+[project.optional-dependencies]
+# real quimb isoTNS Moses Move + TEBD2 (rand_isopeps.real_isotns.*)
+quimb = ["quimb", "autoray"]
+# Riemannian disentangler (rand_isopeps.moses.disentangler: disentangle_riemannian)
+riemannian = ["pymanopt"]
+# convenience: everything
+all = ["quimb", "autoray", "pymanopt"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# keep the optional vendored C++ incremental-QR sources alongside the package
+"rand_isopeps.compression.randommpomps" = ["*.cpp", "*.sh", "*.h"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
