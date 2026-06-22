@@ -2,8 +2,12 @@
 /briefing.md
 /log.md
 
-# curated summaries + figures: kept local, not published
-/reports/
+# curated summaries + notes (reports/*.md, make_advisor_figures.py): kept local.
+# Figures ARE published so collaborators see the plots: ignore everything under
+# reports/ EXCEPT the figures/ subtree (the parent dir stays un-ignored so git can
+# descend into the re-included subdir).
+/reports/*
+!/reports/figures/
 
 # reference papers (kept locally, not published)
 /docs/

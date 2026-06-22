@@ -9,7 +9,11 @@ truncated-SVD primitive ``my_split`` and the alternating-minimization
 primitives (``rand_isopeps.randomized_svd``). Passing ``rand=RandSVD(...)``
 swaps the **local tensor-ring SVDs** -- the first SVD, the disentangler-search
 SVD, and the second SVD -- for a randomized / structured sketch, with the gauge
-kept exact. NOTE: the sideways **R-column zip-up absorption** is still quimb's
+kept exact. For per-stage control pass a ``MosesRandConfig`` (``svd1`` /
+``disentangler_inner`` / ``svd2``); ``rand=RandSVD(...)`` is shorthand for all
+three. A ``MosesStats`` collector threaded through ``stats=`` records per-split
+(stage, shapes, rank fraction rho, timing, tail). NOTE: the sideways **R-column
+zip-up absorption** is still quimb's
 *deterministic* ``tensor_network_1d_compress`` (it is not threaded through
 ``RandSVD``); it is a known randomization insertion point (the block-isoPEPS
 paper lists zip-up / variational / randomized-SVD options) studied synthetically
@@ -30,6 +34,7 @@ orthogonal Procrustes update.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 
 import numpy as np
 import quimb as qu
@@ -39,6 +44,8 @@ from quimb.tensor.decomp import _trim_and_renorm_svd_result
 from quimb.tensor.tensor_core import tags_to_oset
 
 from rand_isopeps.linalg.randomized_svd import SketchSpec, rsvd_truncate
+
+from .instrument import MosesRandConfig, MosesStats
 
 
 @dataclass
@@ -53,6 +60,20 @@ class RandSVD:
     oversample: int = 8
     n_power: int = 1
     rng: np.random.Generator | None = None
+
+
+def _as_config(rand: "RandSVD | MosesRandConfig | None") -> MosesRandConfig:
+    """Normalize the public ``rand`` argument into a per-stage MosesRandConfig.
+
+    ``None`` -> deterministic everywhere; a single ``RandSVD`` -> that sketch on
+    all three local tensor-ring SVDs (svd1 / disentangler_inner / svd2); a
+    ``MosesRandConfig`` -> returned unchanged.
+    """
+    if isinstance(rand, MosesRandConfig):
+        return rand
+    if rand is None:
+        return MosesRandConfig()
+    return MosesRandConfig(svd1=rand, disentangler_inner=rand, svd2=rand)
 
 
 # ----------------------------- the SVD primitive ----------------------------- #
@@ -72,7 +93,8 @@ def _raw_svd(array: np.ndarray, chi_max: int, rand: RandSVD | None):
 
 
 def my_split(T, left_inds, absorb, chi_max, cutoff=1e-10, get="tensors",
-             right_inds=None, ltags=None, rtags=None, stags=None, rand=None):
+             right_inds=None, ltags=None, rtags=None, stags=None, rand=None,
+             stage="svd", stats=None):
     """Truncated SVD of a quimb Tensor across (left_inds | right_inds).
 
     Returns the factor tensors (and singular-value tensor if ``absorb is None``)
@@ -94,13 +116,18 @@ def my_split(T, left_inds, absorb, chi_max, cutoff=1e-10, get="tensors",
     left_dims, right_dims = TT.shape[:nleft], TT.shape[nleft:]
     array = np.asarray(TT.data).reshape(int(np.prod(left_dims)), int(np.prod(right_dims)))
 
+    t0 = perf_counter()
     left, s, right = _raw_svd(array, chi_max, rand)
+    t_svd = perf_counter() - t0
     # discarded Frobenius weight at rank chi_max. In deterministic mode ``s`` is
     # the full spectrum so this is the exact rank-chi_max tail; in randomized mode
     # ``s`` are the rsvd's approximate top-chi_max values, so this is an *estimate*
     # of the residual (it under-counts what the sketch failed to capture).
     arr_norm2 = float(np.vdot(array, array).real)
     err = float(np.sqrt(max(arr_norm2 - float(np.sum(np.abs(s[:chi_max]) ** 2)), 0.0)))
+    if stats is not None:
+        stats.record(array.shape[0], array.shape[1], chi_max, rand, t_svd, err,
+                     stage=stage, array=array)
 
     left, s, right = _trim_and_renorm_svd_result(left, s, right, cutoff, 3, chi_max, absorb, False)
 
@@ -125,15 +152,17 @@ def my_split(T, left_inds, absorb, chi_max, cutoff=1e-10, get="tensors",
 
 # ----------------------------- the disentangler ------------------------------ #
 
-def disentangle(X, dis_bonds, svd_bonds, eta, cutoff=1e-6, Ndis=30, rand=None):
+def disentangle(X, dis_bonds, svd_bonds, eta, cutoff=1e-6, Ndis=30, cfg=None, stats=None):
     """Alternating-minimization disentangler (Dektor / Wei et al.).
 
     Optimizes a unitary Q on ``dis_bonds`` that minimizes the rank-``eta``
     truncation tail across ``svd_bonds``: rank-eta truncation of A(QX), then an
-    orthogonal Procrustes update Q = U V. ``rand`` randomizes the inner rank-eta
-    SVD (the *sketched search*); the Procrustes gauge update stays an exact unit-
-    ary. A fresh sketch is drawn each iteration (the reliable mode).
+    orthogonal Procrustes update Q = U V. ``cfg.disentangler_inner`` randomizes the
+    inner rank-eta search SVD and ``cfg.svd2`` the final second SVD; the Procrustes
+    gauge update stays an exact unitary. A fresh sketch is drawn each iteration
+    (the reliable mode).
     """
+    cfg = _as_config(cfg)
     dims = [X.ind_size(b) for b in dis_bonds]
     dim = qu.prod(dims)
     # match the state dtype so the gauge is a complex unitary for complex states
@@ -147,7 +176,8 @@ def disentangle(X, dis_bonds, svd_bonds, eta, cutoff=1e-6, Ndis=30, rand=None):
         QX = Q @ X
         QX = QX.reindex({ix: ix[:-1] if ix.endswith("*") else ix for ix in QX.inds})
         U, R, err = my_split(QX, svd_bonds, -1, eta, cutoff=cutoff,
-                             ltags=QX.tags, rtags=QX.tags, rand=rand)
+                             ltags=QX.tags, rtags=QX.tags, rand=cfg.disentangler_inner,
+                             stage="disentangler_inner", stats=stats)
         M = (U @ R).reindex({ix: ix + "*" for ix in dis_bonds})
         MX = M @ X.H
         Uq, _, Vq = MX.split(left_inds=dis_bonds, absorb=None)  # exact gauge update
@@ -157,7 +187,8 @@ def disentangle(X, dis_bonds, svd_bonds, eta, cutoff=1e-6, Ndis=30, rand=None):
 
     QX = Q @ X
     QX = QX.reindex({ix: ix[:-1] if ix.endswith("*") else ix for ix in QX.inds})
-    U, R, err = my_split(QX, svd_bonds, -1, eta, cutoff=cutoff, ltags=QX.tags, rtags=QX.tags, rand=rand)
+    U, R, err = my_split(QX, svd_bonds, -1, eta, cutoff=cutoff, ltags=QX.tags, rtags=QX.tags,
+                         rand=cfg.svd2, stage="svd2", stats=stats)
     return Q, U, R, err
 
 
@@ -171,15 +202,17 @@ def split_dim(d: int) -> tuple[int, int]:
 
 # --------------------------- the local ring split ---------------------------- #
 
-def split_3d_iso(T, left_inds, right_inds, up_inds, chi, eta, Ndis, cutoff, rand=None):
+def split_3d_iso(T, left_inds, right_inds, up_inds, chi, eta, Ndis, cutoff, cfg=None, stats=None):
     """Split an active tensor into the isometric 3-tensor ring (Moses local step).
 
     First SVD to bond chi*eta (the isometry L + residual UR), then disentangle +
     second SVD to bond eta, absorbing the gauge inverse into L. Returns
     (L isometric column tensor, U upward carrier, R sideways residual, errors).
     """
+    cfg = _as_config(cfg)
     L, UR, err0 = my_split(T, left_inds, 1, chi * eta, cutoff=cutoff,
-                           right_inds=right_inds.union(up_inds), ltags=T.tags, rtags=T.tags, rand=rand)
+                           right_inds=right_inds.union(up_inds), ltags=T.tags, rtags=T.tags,
+                           rand=cfg.svd1, stage="svd1", stats=stats)
     bond = L.bonds(UR).pop()
     ds = L.ind_size(bond)
     d1, d2 = split_dim(ds)
@@ -192,7 +225,7 @@ def split_3d_iso(T, left_inds, right_inds, up_inds, chi, eta, Ndis, cutoff, rand
     svd_bonds = up_inds.copy()
     svd_bonds.add(new_inds[1])
 
-    Q, U, R, err1 = disentangle(UR, dis_bonds, svd_bonds, eta, Ndis=Ndis, rand=rand)
+    Q, U, R, err1 = disentangle(UR, dis_bonds, svd_bonds, eta, Ndis=Ndis, cfg=cfg, stats=stats)
     L = L @ Q.H
     L = L.reindex({ix: ix[:-1] if ix.endswith("*") else ix for ix in L.inds})
 
@@ -203,7 +236,7 @@ def split_3d_iso(T, left_inds, right_inds, up_inds, chi, eta, Ndis, cutoff, rand
 # ------------------------------- the Moses Move ------------------------------ #
 
 def moses_move(psi, j, chi, eta, cutoff, Ndis,
-               orientation="col", sweep="up", split="right", renorm=True, rand=None):
+               orientation="col", sweep="up", split="right", renorm=True, rand=None, stats=None):
     """Moses move on column/row ``j`` of a quimb PEPS (modifies ``psi`` in place).
 
     Sweeps the column splitting each site into an isometric ring (split_3d_iso),
@@ -212,6 +245,7 @@ def moses_move(psi, j, chi, eta, cutoff, Ndis,
     ``rand=RandSVD(...)`` randomizes every SVD in the move. Returns the per-site
     (disentangler, first-SVD) truncation errors.
     """
+    cfg = _as_config(rand)
     if orientation == "col":
         from_which = "xmax" if sweep == "up" else "xmin"
     else:
@@ -234,7 +268,7 @@ def moses_move(psi, j, chi, eta, cutoff, Ndis,
 
         L, U, R, errs = split_3d_iso(psi[site], left_inds=None, right_inds=right_bonds,
                                      up_inds=up_bonds, chi=chi, eta=eta, Ndis=Ndis,
-                                     cutoff=cutoff, rand=rand)
+                                     cutoff=cutoff, cfg=cfg, stats=stats)
         mm_errs = errs if mm_errs is None else np.concatenate([mm_errs, errs], axis=1)
 
         U.drop_tags()
@@ -248,7 +282,8 @@ def moses_move(psi, j, chi, eta, cutoff, Ndis,
     site = rot.site_tag(i, j)
     right_bonds = psi[site].bonds(psi[rot.site_tag(i, j_next)]).union(psi[site].bonds(R))
     L, R, err0 = my_split(psi[site], None, 1, chi * eta, cutoff=cutoff,
-                          right_inds=right_bonds, ltags=psi[site].tags, rtags=psi[site].tags, rand=rand)
+                          right_inds=right_bonds, ltags=psi[site].tags, rtags=psi[site].tags,
+                          rand=cfg.svd1, stage="svd1", stats=stats)
     errs = np.reshape(np.stack([np.asarray(0.0), np.asarray(err0)]), (2, 1))
     mm_errs = np.concatenate([mm_errs, errs], axis=1)
 
@@ -266,11 +301,13 @@ def moses_move(psi, j, chi, eta, cutoff, Ndis,
     if renorm:
         site = rot.site_tag(i, j_next)
         psi[site] = psi[site] / psi[site].norm()
+    if stats is not None:
+        stats.n_moves += 1
     return mm_errs
 
 
 def random_isotns(Lx, Ly, bond=2, phys=2, chi=64, eta=64, cutoff=1e-10, Ndis=20,
-                  seed=None, rand=None):
+                  seed=None, rand=None, stats=None):
     """Build a random isoTNS by Moses-sweeping a random quimb PEPS to canonical
     form (mirrors Dektor's ``rand_isoTNS``). ``rand`` randomizes the sweep's SVDs.
     Returns the canonicalized PEPS."""
@@ -278,6 +315,7 @@ def random_isotns(Lx, Ly, bond=2, phys=2, chi=64, eta=64, cutoff=1e-10, Ndis=20,
     psi.normalize()
     for j in range(Ly - 1, 0, -1):
         moses_move(psi, j, chi, eta, cutoff, Ndis, orientation="col",
-                   sweep=("down" if j % 2 == 0 else "up"), split="left", renorm=False, rand=rand)
+                   sweep=("down" if j % 2 == 0 else "up"), split="left", renorm=False,
+                   rand=rand, stats=stats)
     psi.canonize_column(0, "down")
     return psi

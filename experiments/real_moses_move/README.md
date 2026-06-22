@@ -24,4 +24,4 @@ Outputs land in `outputs/real_moses_move/` (gitignored).
 
 ## Scripts
 
-- `exp01_real_moses_move.py` — deterministic vs randomized SVD (gaussian / sparsestack / countsketch) inside the real quimb isoTNS Moses Move: sweep the vertical truncation bond `eta` and compare the represented-state error `1 - |<psi0|psi>|` after a Moses move.
+- `exp01_real_moses_move.py` — **E1, stage ablation.** One real Moses move on a 3×3 PEPS (exact contraction), isolating *which* local tensor-ring SVD is randomized via the per-stage `MosesRandConfig`: `det`, `RSVD1`, `RSVD2`, `sketch-Q`, `sketch-Q+RSVD2`, `all-rand`. Headline metric is the represented-state error `1 - |<psi0|psi>|`; paired over PEPS-instance × sketch seeds with median+IQR bands, plus a per-stage rank-fraction panel (ρ1 vs ρ2 from `MosesStats`). Finding: randomizing the low-rank `svd2`/disentangler stages is accuracy-neutral, while `svd1` is full-rank (ρ1≈1) at these settings so `RSVD1`/`all-rand` only add a degradation tail. `--sketch` fixes the sketch family; `--instances`, `--sketch-seeds` set the statistics.
