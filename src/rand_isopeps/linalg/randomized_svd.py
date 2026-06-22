@@ -20,6 +20,9 @@ class SVDResult:
     s: np.ndarray
     vh: np.ndarray
     method: str
+    ell: int = 0  # actual range-basis width: sketch width Y.shape[1] (rsvd) or rank
+    # (svd). For sparsestack ell = zeta*ceil((k+s)/zeta) > k+s, so callers that
+    # report a rank fraction rho=ell/min(m,n) must use this, not k+oversample.
 
     @property
     def rank(self) -> int:
@@ -94,7 +97,7 @@ def svd_truncate(a: np.ndarray, k: int) -> SVDResult:
         raise ValueError("k must be positive")
     u, s, vh = la.svd(a, full_matrices=False, check_finite=False, lapack_driver="gesdd")
     kk = min(k, s.shape[0])
-    return SVDResult(u=u[:, :kk], s=s[:kk], vh=vh[:kk, :], method="svd")
+    return SVDResult(u=u[:, :kk], s=s[:kk], vh=vh[:kk, :], method="svd", ell=kk)
 
 
 def rsvd_truncate(
@@ -134,7 +137,10 @@ def rsvd_truncate(
     b = q.conj().T @ a
     u_hat, s, vh = la.svd(b, full_matrices=False, check_finite=False, lapack_driver="gesdd")
     u = q @ u_hat
-    return SVDResult(u=u[:, :kk], s=s[:kk], vh=vh[:kk, :], method=f"rsvd-{as_spec(sketch).kind}")
+    # actual range-basis width: q has min(m, y.shape[1]) columns -- the QR rank of the
+    # sketch. For sparsestack y.shape[1] = zeta*ceil(ell/zeta) > kk+oversample.
+    return SVDResult(u=u[:, :kk], s=s[:kk], vh=vh[:kk, :],
+                     method=f"rsvd-{as_spec(sketch).kind}", ell=int(q.shape[1]))
 
 
 def relative_frobenius_error(a: np.ndarray, approx: np.ndarray) -> float:

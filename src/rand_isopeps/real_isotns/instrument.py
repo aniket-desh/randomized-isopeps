@@ -64,18 +64,27 @@ class MosesStats:
     """
 
     debug_tail: bool = False
+    keep_arrays: tuple[str, ...] = ()  # stages whose input matrix to retain (kernel benchmarks)
     records: list[SplitRecord] = field(default_factory=list)
+    arrays: list[tuple[str, np.ndarray]] = field(default_factory=list)
     n_moves: int = 0
 
-    def record(self, m, n, chi_max, rand, t_svd, tail, *, stage, array=None):
+    def record(self, m, n, chi_max, rand, t_svd, tail, *, stage, array=None, actual_ell=None):
         mn = min(int(m), int(n))
         k = min(int(chi_max), int(m), int(n))
         randomized = rand is not None and getattr(rand, "sketch", None) is not None
-        ell = min(k + (rand.oversample if randomized else 0), mn)
+        # Rank fraction uses the ACTUAL range-basis width when known: sparsestack rounds
+        # k+oversample up to zeta*ceil(./zeta), so the nominal k+oversample under-reports rho.
+        if actual_ell is not None:
+            ell = min(int(actual_ell), mn)
+        else:
+            ell = min(k + (rand.oversample if randomized else 0), mn)
         true_tail = None
         if self.debug_tail and randomized and array is not None:
             sv = np.linalg.svd(array, compute_uv=False)
             true_tail = float(np.sqrt(float(np.sum(sv[chi_max:] ** 2))))
+        if array is not None and stage in self.keep_arrays:
+            self.arrays.append((stage, np.array(array, copy=True)))
         self.records.append(SplitRecord(
             stage, int(m), int(n), k, ell, (ell / mn if mn else 0.0),
             float(t_svd), float(tail), true_tail,

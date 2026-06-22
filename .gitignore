@@ -8,6 +8,7 @@
 # descend into the re-included subdir).
 /reports/*
 !/reports/figures/
+!/reports/real_moses_summary.md
 
 # reference papers (kept locally, not published)
 /docs/

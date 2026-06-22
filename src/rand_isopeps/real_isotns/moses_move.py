@@ -85,11 +85,12 @@ def _raw_svd(array: np.ndarray, chi_max: int, rand: RandSVD | None):
     (the truncation/absorb is then applied identically by quimb's helper).
     """
     if rand is None or rand.sketch is None:
-        return np.linalg.svd(array, full_matrices=False)
+        u, s, vh = np.linalg.svd(array, full_matrices=False)
+        return u, s, vh, None
     k = min(chi_max, array.shape[0], array.shape[1])
     res = rsvd_truncate(array, k, oversample=rand.oversample, n_power=rand.n_power,
                         rng=rand.rng, sketch=rand.sketch)
-    return res.u, res.s, res.vh
+    return res.u, res.s, res.vh, res.ell
 
 
 def my_split(T, left_inds, absorb, chi_max, cutoff=1e-10, get="tensors",
@@ -117,7 +118,7 @@ def my_split(T, left_inds, absorb, chi_max, cutoff=1e-10, get="tensors",
     array = np.asarray(TT.data).reshape(int(np.prod(left_dims)), int(np.prod(right_dims)))
 
     t0 = perf_counter()
-    left, s, right = _raw_svd(array, chi_max, rand)
+    left, s, right, actual_ell = _raw_svd(array, chi_max, rand)
     t_svd = perf_counter() - t0
     # discarded Frobenius weight at rank chi_max. In deterministic mode ``s`` is
     # the full spectrum so this is the exact rank-chi_max tail; in randomized mode
@@ -127,7 +128,7 @@ def my_split(T, left_inds, absorb, chi_max, cutoff=1e-10, get="tensors",
     err = float(np.sqrt(max(arr_norm2 - float(np.sum(np.abs(s[:chi_max]) ** 2)), 0.0)))
     if stats is not None:
         stats.record(array.shape[0], array.shape[1], chi_max, rand, t_svd, err,
-                     stage=stage, array=array)
+                     stage=stage, array=array, actual_ell=actual_ell)
 
     left, s, right = _trim_and_renorm_svd_result(left, s, right, cutoff, 3, chi_max, absorb, False)
 
@@ -192,12 +193,22 @@ def disentangle(X, dis_bonds, svd_bonds, eta, cutoff=1e-6, Ndis=30, cfg=None, st
     return Q, U, R, err
 
 
-def split_dim(d: int) -> tuple[int, int]:
-    """Factor a bond dimension d = d1*d2 for the intermediate ring bond split."""
-    for d1 in range(int(np.sqrt(d)), 0, -1):
-        if d % d1 == 0:
-            return d1, d // d1
-    return 1, d
+def split_dim(ds: int, eta: int | None = None, chi: int | None = None) -> tuple[int, int]:
+    """Factor the post-first-SVD bond ``ds = d1*d2`` for the intermediate ring split.
+
+    When ``ds == chi*eta`` (the untruncated first-SVD bond) return ``(chi, eta)``: the
+    ``d2 = eta`` half is the one grouped with ``up_inds`` in the second SVD (see
+    ``split_3d_iso``), so its cut is the block-Moses ``(eta*n2) x (chi*n3)`` -- aligning
+    the real move with the synthetic theory and making the reported
+    ``rho2 = eta/min(eta*n2, chi*n3)`` meaningful. Otherwise (the bond was cutoff-
+    truncated below ``chi*eta``) fall back to a near-square factorization.
+    """
+    if eta is not None and chi is not None and ds == int(eta) * int(chi):
+        return int(chi), int(eta)
+    for d1 in range(int(np.sqrt(ds)), 0, -1):
+        if ds % d1 == 0:
+            return d1, ds // d1
+    return 1, ds
 
 
 # --------------------------- the local ring split ---------------------------- #
@@ -215,7 +226,7 @@ def split_3d_iso(T, left_inds, right_inds, up_inds, chi, eta, Ndis, cutoff, cfg=
                            rand=cfg.svd1, stage="svd1", stats=stats)
     bond = L.bonds(UR).pop()
     ds = L.ind_size(bond)
-    d1, d2 = split_dim(ds)
+    d1, d2 = split_dim(ds, eta, chi)
 
     new_inds = (qtn.rand_uuid(), qtn.rand_uuid())
     L.unfuse({bond: new_inds}, {bond: (d1, d2)}, inplace=True)
