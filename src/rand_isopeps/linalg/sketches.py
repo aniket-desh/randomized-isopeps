@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
+import scipy.sparse as sp
 
 SketchKind = Literal["gaussian", "rademacher", "countsketch", "sparsestack", "khatri_rao"]
 BaseKind = Literal["gaussian", "rademacher", "spherical"]
@@ -92,14 +93,28 @@ def _dense(a: np.ndarray, ell: int, rng: np.random.Generator, kind: str) -> np.n
     return (a @ omega.astype(a.dtype, copy=False)) / np.sqrt(ell)
 
 
+def _apply_countsketch(a: np.ndarray, buckets: np.ndarray, signs: np.ndarray, b: int) -> np.ndarray:
+    """``Y = a @ S`` where ``S`` (n x b) has one signed nonzero per row, ``S[i, buckets[i]] =
+    signs[i]``.
+
+    A compiled sparse matmul (``scipy.sparse``) instead of an unbuffered ``np.add.at``
+    scatter: same result to float roundoff but ~10x faster, so wall-clock is not hobbled by a
+    slow primitive. (The implementation-free algorithm cost is reported separately by
+    ``experiment_utils.cost_model``; even this scipy path is ~10-30x slower than a dense
+    Gaussian GEMM, which is irreducible dense-vs-sparse-BLAS, hence the cost model is the fair
+    cross-sketch metric.) ``buckets``/``signs`` are caller-drawn so each caller keeps its own
+    RNG convention -- the draws are unchanged, only the application differs."""
+    n = a.shape[1]
+    S = sp.csr_matrix((signs.astype(a.dtype, copy=False), (buckets, np.arange(n))), shape=(b, n))
+    return np.asarray(S @ a.T).T
+
+
 def _countsketch_block(a: np.ndarray, b: int, rng: np.random.Generator) -> np.ndarray:
     """One CountSketch block: hash each column of ``a`` into one of ``b`` signed buckets."""
     n = a.shape[1]
     buckets = rng.integers(0, b, size=n)
     signs = _signs(rng, n, a.dtype)
-    y = np.zeros((a.shape[0], b), dtype=a.dtype)
-    np.add.at(y, (slice(None), buckets), a * signs[None, :])
-    return y
+    return _apply_countsketch(a, buckets, signs, b)
 
 
 def _sparsestack(a: np.ndarray, ell: int, rng: np.random.Generator, zeta: int) -> np.ndarray:

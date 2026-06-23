@@ -45,6 +45,7 @@ from time import perf_counter
 import numpy as np
 
 from rand_isopeps.aggregate import median_band
+from rand_isopeps.experiment_utils.cost_model import compare as cost_compare
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.linalg.randomized_svd import relative_frobenius_error, rsvd_truncate, svd_truncate
 from rand_isopeps.parallel import run_parallel, with_blas_threads
@@ -113,37 +114,37 @@ def _run_one(task):
 
         base = {"chi": chi, "eta": eta, "bond": bond, "instance": inst,
                 "m": m, "n": n, "min_mn": mn, "k": k}
+        # det reference: cost ratios are vs itself = 1 (the baseline line)
         rows = [{**base, "sketch": "det", "rel_error": det_err, "excess": 0.0,
-                 "time_s": t_det, "matched_speedup": 1.0, "rho2_used": k / mn, "cfg": "det"}]
+                 "time_s": t_det, "matched_speedup": 1.0, "flop_speedup": 1.0, "mem_ratio": 1.0,
+                 "det_passes": 1, "rand_passes": 1, "rho2_used": k / mn, "cfg": "det"}]
 
         bound = max(args.tol * det_err, det_err + 1e-15)
         for sketch, _c, _mk in SKETCHES[1:]:
             # Pareto cloud over the tuning knobs (oversample s, power iters q)
-            cloud = []  # (e, t, rho2, s, q)
+            cloud = []  # (e, t, rho2, ell, s, q)
             for s in args.oversamples:
                 for q in args.n_powers:
                     rng = np.random.default_rng(args.seed + 17 * inst + 131 * s + 7 * q)
                     res = rsvd_truncate(A, k, oversample=s, n_power=q, rng=rng, sketch=sketch)
                     e = relative_frobenius_error(A, res.reconstruct())
-                    rho2 = res.ell / mn  # ACTUAL width (sparsestack-corrected)
                     t = _median_time(
                         lambda s=s, q=q: rsvd_truncate(A, k, oversample=s, n_power=q,
                                                        rng=np.random.default_rng(0), sketch=sketch),
                         args.repeats)
-                    cloud.append((e, t, rho2, s, q))
+                    cloud.append((e, t, res.ell / mn, res.ell, s, q))  # rho2 uses ACTUAL width
             valid = [c for c in cloud if c[0] <= bound]
-            if valid:  # matched-accuracy: cheapest config within tol of deterministic
-                e_b, t_b, rho2_b, s_b, q_b = min(valid, key=lambda c: c[1])
-                rows.append({**base, "sketch": sketch, "rel_error": e_b, "excess": e_b / det_err - 1.0,
-                             "time_s": t_b, "matched_speedup": t_det / t_b, "rho2_used": rho2_b,
-                             "cfg": f"s={s_b},q={q_b}"})
-            else:  # nothing matched accuracy: record the most accurate config, speedup nan
-                e_b, t_b, rho2_b, s_b, q_b = min(cloud, key=lambda c: c[0])
-                rows.append({**base, "sketch": sketch, "rel_error": e_b, "excess": e_b / det_err - 1.0,
-                             "time_s": t_b, "matched_speedup": float("nan"), "rho2_used": rho2_b,
-                             "cfg": f"s={s_b},q={q_b}*"})
-        # the matrix rank fraction (method-independent regime axis)
-        for r in rows:
+            # matched-accuracy: cheapest valid config; else the most accurate (flagged *)
+            chosen = min(valid, key=lambda c: c[1]) if valid else min(cloud, key=lambda c: c[0])
+            e_b, t_b, rho2_b, ell_b, s_b, q_b = chosen
+            # implementation-FREE algorithm cost at the matched config (FLOPs/passes/peak mem)
+            cc = cost_compare(m, n, k, int(ell_b), n_power=q_b, sketch=sketch, zeta=4)
+            rows.append({**base, "sketch": sketch, "rel_error": e_b, "excess": e_b / det_err - 1.0,
+                         "time_s": t_b, "matched_speedup": (t_det / t_b) if valid else float("nan"),
+                         "flop_speedup": cc.flop_speedup, "mem_ratio": cc.mem_ratio,
+                         "det_passes": cc.det_passes, "rand_passes": cc.rand_passes,
+                         "rho2_used": rho2_b, "cfg": f"s={s_b},q={q_b}" + ("" if valid else "*")})
+        for r in rows:  # matrix rank fraction (method-independent regime axis)
             r["matrix_rho2"] = k / mn
         return rows
 
@@ -186,16 +187,22 @@ def make_plot(rows, fig_path):
                          ylow=lo, yhigh=hi, color="#d55e00", marker="o")]
 
     panels = [
-        Panel("matched-accuracy speedup", "source bond", "T_det / T_rand", "log",
+        # PRIMARY: implementation-free algorithm work (the fair cross-method/cross-sketch axis)
+        Panel("FLOP-speedup (implementation-free)", "source bond", "det_flops / rand_flops", "log",
+              _series(rand_rows, "flop_speedup", rand_order)),
+        # SECONDARY: wall-clock on THIS machine -- gaussian >> sparsestack here is a dense-vs-
+        # sparse-BLAS implementation gap, NOT an algorithm difference (see panel 1, where they match)
+        Panel("wall-clock speedup (this machine)", "source bond", "T_det / T_rand", "log",
               _series(rand_rows, "matched_speedup", rand_order)),
-        Panel("SVD2 kernel time", "source bond", "time (s)", "log",
-              _series(rows, "time_s", order)),
-        Panel("svd2 rank fraction", "source bond", "rho2 = eta / min(m,n)", "log",
-              rho_series),
-        Panel("excess at matched config", "source bond",
-              "eps_rand/eps_det - 1", "linear", _series(rand_rows, "excess", rand_order)),
+        Panel("peak-memory ratio (det / rand)", "source bond", "mem ratio", "log",
+              _series(rand_rows, "mem_ratio", rand_order)),
+        Panel("passes over A (rand; det = 1)", "source bond", "passes", "linear",
+              _series(rand_rows, "rand_passes", rand_order)),
+        Panel("svd2 rank fraction", "source bond", "rho2 = eta / min(m,n)", "log", rho_series),
+        Panel("excess at matched config", "source bond", "eps_rand/eps_det - 1", "linear",
+              _series(rand_rows, "excess", rand_order)),
     ]
-    write_line_panels(fig_path, panels, width=1500, height=420)
+    write_line_panels(fig_path, panels, width=2280, height=400)
 
 
 def parse_args():

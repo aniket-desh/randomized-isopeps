@@ -11,7 +11,7 @@ import scipy.linalg as la
 # SketchKind here so existing callers `from rand_isopeps.linalg.randomized_svd import SketchKind`
 # keep working with the widened set (gaussian/rademacher/countsketch/sparsestack/
 # khatri_rao).
-from .sketches import SketchKind, SketchSpec, as_spec
+from .sketches import SketchKind, SketchSpec, as_spec, _apply_countsketch
 from .sketches import range_sample as _structured_range_sample
 
 @dataclass
@@ -76,11 +76,11 @@ def _range_sample(
     # (exp1-11 depend on their exact RNG draw order); delegate only the new
     # structured kinds to sketches.range_sample.
     if spec.kind == "countsketch":
+        # Same RNG draws (buckets, real signs) as before -- byte-compatible RNG stream -- but
+        # applied via a compiled sparse matmul instead of np.add.at (faster; ~1e-15 result diff).
         buckets = rng.integers(0, ell, size=a.shape[1])
         signs = rng.choice(np.array([-1.0, 1.0]), size=a.shape[1])
-        y = np.zeros((a.shape[0], ell), dtype=a.dtype)
-        np.add.at(y, (slice(None), buckets), a * signs[None, :])
-        return y
+        return _apply_countsketch(a, buckets, signs, ell)
     if spec.kind in ("gaussian", "rademacher"):
         omega = _test_matrix(a.shape[1], ell, a.dtype, rng, spec.kind)
         return a @ omega
