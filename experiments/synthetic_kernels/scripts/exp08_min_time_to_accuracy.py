@@ -22,6 +22,7 @@ import argparse
 import numpy as np
 
 from rand_isopeps.aggregate import median_band
+from rand_isopeps.experiment_utils.cost_model import local_ring_compare
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.local_ring_decomp import LocalMode, local_ring_decomp
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
@@ -32,6 +33,8 @@ from rand_isopeps.tn_shapes import MosesDims
 SUITE = "synthetic_kernels"
 
 RAND_MODES: tuple[LocalMode, ...] = ("rand_first", "rand_second", "rand_both")
+# which local SVDs each mode randomizes -> (randomize_first, randomize_second), for the cost model
+_MODE_STAGES = {"rand_first": (True, False), "rand_second": (False, True), "rand_both": (True, True)}
 ISO_TOL = 1e-10
 
 
@@ -78,8 +81,16 @@ def _run_trial(task: tuple[argparse.Namespace, int, int, str, int]) -> list[dict
                 sp, cfg = _best_speedup(tensor, dims, mode, det_time, det_err,
                                         args.oversamples, args.n_powers, tol, rng)
                 tag = f"{tol:g}".replace(".", "p")
-                row[f"speedup_{tag}"] = sp
+                row[f"speedup_{tag}"] = sp  # wall-clock (this machine)
                 row[f"cfg_{tag}"] = "" if cfg is None else f"s={cfg[0]},q={cfg[1]}"
+                # implementation-free FLOP-speedup at the same matched config (the fair metric)
+                if cfg is not None:
+                    fc = local_ring_compare(dims, *_MODE_STAGES[mode], oversample=cfg[0], n_power=cfg[1])
+                    row[f"flop_speedup_{tag}"] = fc["flop_speedup"]
+                    row[f"mem_ratio_{tag}"] = fc["mem_ratio"]
+                else:
+                    row[f"flop_speedup_{tag}"] = float("nan")
+                    row[f"mem_ratio_{tag}"] = float("nan")
             rows.append(row)
         return rows
 
@@ -94,9 +105,13 @@ def run(args: argparse.Namespace) -> tuple[str, str]:
     rows = flatten(run_parallel(_run_trial, tasks, workers))
 
     stamp = timestamp_slug()
+    tag = f"{args.tols[-1]:g}".replace(".", "p")
     csv_path, fig_path = output_paths(SUITE, f"exp8-tta-{stamp}")
     write_csv(csv_path, rows)
-    make_plot(rows, fig_path, args.ds, args.ensembles, args.tols[-1])
+    # PRIMARY figure = implementation-free FLOP-speedup; secondary = wall-clock (this machine)
+    make_plot(rows, fig_path, args.ds, args.ensembles, f"flop_speedup_{tag}", "best valid FLOP-speedup")
+    _, fig_wall = output_paths(SUITE, f"exp8-tta-wallclock-{stamp}")
+    make_plot(rows, fig_wall, args.ds, args.ensembles, f"speedup_{tag}", "best valid wall-clock speedup")
     return csv_path, fig_path
 
 
@@ -109,12 +124,11 @@ def _series(rows, key):
     ]
 
 
-def make_plot(rows, fig_path, ds, ensembles, tol) -> None:
-    """Rows = d, columns = ensemble; best valid speedup (at the loosest tol) vs eta."""
-    key = f"speedup_{tol:g}".replace(".", "p")
+def make_plot(rows, fig_path, ds, ensembles, key, ylabel) -> None:
+    """Rows = d, columns = ensemble; ``key`` (best valid speedup, at the loosest tol) vs eta."""
     grid = [
         [
-            Panel(ensemble, "eta", "best valid speedup", "log",
+            Panel(ensemble, "eta", ylabel, "log",
                   _series([r for r in rows if int(r["d"]) == d and r["ensemble"] == ensemble], key))
             for ensemble in ensembles
         ]

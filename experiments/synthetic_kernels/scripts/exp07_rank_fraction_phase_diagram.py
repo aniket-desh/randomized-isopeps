@@ -27,6 +27,7 @@ import math
 
 import numpy as np
 
+from rand_isopeps.experiment_utils.cost_model import compare as cost_compare
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.local_ring_decomp import local_ring_decomp
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
@@ -61,11 +62,16 @@ def _run_trial(task: tuple[argparse.Namespace, dict, int]) -> list[dict[str, obj
                 tensor, dims, mode=mode, oversample=combo["oversample"],
                 n_power=args.n_power, sketch=args.sketch, rng=rng,
             ).metrics(tensor)
+            m_, n_ = dims.matrix_shape(target)
+            k_ = dims.target_rank(target)
+            fc = cost_compare(m_, n_, k_, min(k_ + combo["oversample"], m_, n_),
+                              n_power=args.n_power, sketch=args.sketch)  # implementation-free
             rows.append({
                 **dims.as_dict(), "ensemble": combo["ensemble"], "target": target,
                 "oversample": combo["oversample"], "trial": trial,
                 "rho": dims.rank_fraction(target, combo["oversample"]),
-                "speedup": float(det[time_key]) / max(float(rnd[time_key]), 1e-12),
+                "speedup": float(det[time_key]) / max(float(rnd[time_key]), 1e-12),  # wall-clock
+                "flop_speedup": fc.flop_speedup, "mem_ratio": fc.mem_ratio,
                 "excess_error": float(rnd["rel_error"]) - float(det["rel_error"]),
             })
         return rows
@@ -84,37 +90,41 @@ def run(args: argparse.Namespace) -> tuple[str, str]:
     stamp = timestamp_slug()
     csv_path, fig_path = output_paths(SUITE, f"exp7-phase-{stamp}")
     write_csv(csv_path, rows)
-    make_plot(rows, fig_path, args.ensembles)
+    # PRIMARY = implementation-free FLOP-speedup vs rho; SECONDARY = wall-clock (this machine)
+    make_plot(rows, fig_path, args.ensembles, "flop_speedup", "FLOP-speedup (det / rand)")
+    _, fig_wall = output_paths(SUITE, f"exp7-phase-wallclock-{stamp}")
+    make_plot(rows, fig_wall, args.ensembles, "speedup", "wall-clock speedup (det / rand)")
     return csv_path, fig_path
 
 
-def _points(rows: list[dict[str, object]]) -> tuple[list[float], list[float], list[float]]:
-    """Median (rho, speedup, log10 excess) per parameter group."""
+def _points(rows: list[dict[str, object]], y_key: str = "speedup") -> tuple[list[float], list[float], list[float]]:
+    """Median (rho, y_key, log10 excess) per parameter group."""
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for r in rows:
         groups[(r["chi"], r["eta"], r["d"], r["oversample"])].append(r)
     xs, ys, cs = [], [], []
     for pts in groups.values():
         xs.append(float(pts[0]["rho"]))
-        ys.append(float(np.median([p["speedup"] for p in pts])))
+        ys.append(float(np.median([p[y_key] for p in pts])))
         excess = float(np.median([p["excess_error"] for p in pts]))
         cs.append(math.log10(max(excess, EXCESS_FLOOR)))
     return xs, ys, cs
 
 
-def make_plot(rows: list[dict[str, object]], fig_path: str, ensembles: list[str]) -> None:
-    """Rows = ensemble, columns = SVD target; x = rho, y = speedup, color = excess."""
+def make_plot(rows: list[dict[str, object]], fig_path: str, ensembles: list[str],
+              y_key: str, ylabel: str) -> None:
+    """Rows = ensemble, columns = SVD target; x = rho, y = ``y_key``, color = excess."""
     all_c = []
     grid: list[list[ScatterPanel]] = []
     for ens in ensembles:
         row_panels = []
         for target, (_, _, marker) in TARGETS.items():
             sub = [r for r in rows if r["ensemble"] == ens and r["target"] == target]
-            x, y, c = _points(sub)
+            x, y, c = _points(sub, y_key)
             all_c.extend(c)
             row_panels.append(ScatterPanel(
                 title=f"SVD{1 if target == 'first' else 2}",
-                xlabel=r"$\rho=(k+s)/\min(m,n)$", ylabel="speedup (det / rand)",
+                xlabel=r"$\rho=(k+s)/\min(m,n)$", ylabel=ylabel,
                 xscale="log", yscale="log",
                 series=[ScatterSeries(f"SVD{1 if target == 'first' else 2}", x, y, c, marker)],
                 hlines=[1.0],

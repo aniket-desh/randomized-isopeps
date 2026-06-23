@@ -134,3 +134,41 @@ def compare(m: int, n: int, k: int, ell: int, n_power: int = 1,
         det_passes=passes_over_a("det", n_power), rand_passes=passes_over_a("rand", n_power),
         det_peak_floats=dp, rand_peak_floats=rp, mem_ratio=dp / rp if rp else float("nan"),
     )
+
+
+def local_ring_compare(dims, randomize_first: bool, randomize_second: bool,
+                       oversample: int = 8, n_power: int = 1, sketch: str = "gaussian",
+                       zeta: int = 4) -> dict:
+    """Implementation-free cost for the synthetic local two-SVD ring decomposition.
+
+    ``dims`` is a ``MosesDims`` (exposes ``matrix_shape``/``target_rank`` for "first"/"second").
+    The decomp does a first SVD (``n1 x n2n3 -> k1``) and a second SVD
+    (``(eta n2) x (chi n3) -> k2``); a stage is randomized per its flag. Returns the
+    whole-decomp FLOP-speedup (det / rand), peak-memory ratio, and pass counts -- the fair,
+    implementation-free analogue of the wall-clock speedup the rand modes are timed by.
+    """
+    det_flops = rand_flops = 0.0
+    det_peak = rand_peak = 0.0
+    det_passes = rand_passes = 0
+    for target, randomize in (("first", randomize_first), ("second", randomize_second)):
+        m, n = dims.matrix_shape(target)
+        k = dims.target_rank(target)
+        df = svd_truncate_flops(m, n)
+        det_flops += df
+        det_peak = max(det_peak, peak_intermediate_floats("det", m, n, k, k, sketch, zeta))
+        det_passes += passes_over_a("det")
+        if randomize:
+            ell = min(k + oversample, m, n)
+            rand_flops += rsvd_flops(m, n, k, ell, n_power, sketch, zeta)
+            rand_peak = max(rand_peak, peak_intermediate_floats("rand", m, n, k, ell, sketch, zeta))
+            rand_passes += passes_over_a("rand", n_power)
+        else:
+            rand_flops += df
+            rand_peak = max(rand_peak, peak_intermediate_floats("det", m, n, k, k, sketch, zeta))
+            rand_passes += passes_over_a("det")
+    return {
+        "flop_speedup": det_flops / rand_flops if rand_flops else float("nan"),
+        "det_flops": det_flops, "rand_flops": rand_flops,
+        "mem_ratio": det_peak / rand_peak if rand_peak else float("nan"),
+        "det_passes": det_passes, "rand_passes": rand_passes,
+    }

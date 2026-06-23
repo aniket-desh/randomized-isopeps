@@ -47,6 +47,7 @@ from time import perf_counter
 import numpy as np
 
 from rand_isopeps.aggregate import median_band
+from rand_isopeps.experiment_utils.cost_model import rsvd_flops, svd_truncate_flops
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.parallel import run_parallel, with_blas_threads
 # NOTE: rand_isopeps.plotting (-> matplotlib) is imported lazily in the plotting
@@ -117,12 +118,19 @@ def _run_one(args, eta, inst, sk, mi, name, stages):
                       sweep="up", split="left", renorm=False, rand=cfg, stats=stats)
     runtime = perf_counter() - t
     overlap = abs((psi0.H | psi).contract()) / (psi0.norm() * psi.norm())
+    # implementation-free total FLOPs of the move's local SVDs (a stage is randomized when
+    # its recorded ell > k); paired against det -> flop_speedup, the fair analogue of runtime.
+    total_flops = sum(
+        rsvd_flops(rec.m, rec.n, rec.k, rec.ell, n_power=1, sketch=args.sketch)
+        if rec.ell > rec.k else svd_truncate_flops(rec.m, rec.n)
+        for rec in stats.records)
     return {
         "method": name, "eta": eta, "instance": inst,
         "sketch": args.sketch if stages else "none", "sketch_seed": sk if stages else -1,
         "state_error": float(max(1.0 - overlap, 0.0)),
         "norm_ratio": float(psi.norm() / psi0.norm() - 1.0),
         "max_trunc_err": float(np.max(errs)), "runtime_s": runtime,
+        "total_flops": float(total_flops),
         **_stage_metrics(stats),
     }
 
@@ -147,6 +155,7 @@ def run(args):
           f"bond={args.bond}, chi={args.chi}, sketch={args.sketch})")
     rows = run_parallel(_task, tasks, workers)
     _attach_excess(rows)
+    _attach_flops(rows)
     stamp = timestamp_slug()
     csv_path, fig_path = output_paths(SUITE, f"exp01-stage-ablation-{stamp}")
     write_csv(csv_path, rows)
@@ -159,6 +168,15 @@ def _attach_excess(rows):
     base = {(r["eta"], r["instance"]): r["state_error"] for r in rows if r["method"] == "det"}
     for r in rows:
         r["excess_state_error"] = r["state_error"] - base.get((r["eta"], r["instance"]), float("nan"))
+
+
+def _attach_flops(rows):
+    """Paired implementation-free FLOP-speedup over det on the same (eta, instance) -- the fair,
+    machine-independent analogue of the wall-clock runtime panel."""
+    base = {(r["eta"], r["instance"]): r["total_flops"] for r in rows if r["method"] == "det"}
+    for r in rows:
+        d = base.get((r["eta"], r["instance"]), float("nan"))
+        r["flop_speedup"] = d / r["total_flops"] if r.get("total_flops") else float("nan")
 
 
 def _series(rows, key, order, ci=None):
@@ -189,10 +207,13 @@ def make_plot(rows, fig_path):
               _series(rows, "state_error", order)),
         Panel("excess over deterministic", "eta", "state err (rand - det)", "linear",
               _series(rows, "excess_state_error", order[1:])),
-        Panel("Moses-move runtime", "eta", "runtime (s)", "log", _series(rows, "runtime_s", order)),
+        Panel("FLOP-speedup (impl-free)", "eta", "det_flops / rand_flops", "log",
+              _series([r for r in rows if r["method"] != "det"], "flop_speedup", order[1:])),
+        Panel("Moses-move runtime (this machine)", "eta", "runtime (s)", "log",
+              _series(rows, "runtime_s", order)),
         Panel("rank fraction by stage", "eta", "rho = (k+s)/min(m,n)", "linear", rho_series),
     ]
-    write_line_panels(fig_path, panels, width=1500, height=420)
+    write_line_panels(fig_path, panels, width=1850, height=420)
 
 
 def parse_args():

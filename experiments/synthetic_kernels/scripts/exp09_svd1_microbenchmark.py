@@ -20,6 +20,7 @@ from time import perf_counter
 import numpy as np
 import scipy.linalg as la
 
+from rand_isopeps.experiment_utils.cost_model import compare as cost_compare
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
 from rand_isopeps.plotting import Panel, Series, write_panel_grid
@@ -40,6 +41,8 @@ _STYLE = {
     "reconstruct": ("#999999", "X"),
     "det_error": ("#0072b2", "o"),
     "rand_error": ("#d55e00", "s"),
+    "flop_speedup": ("#d55e00", "s"),
+    "wall_speedup": ("#0072b2", "o"),
 }
 
 
@@ -100,10 +103,16 @@ def _run_trial(task: tuple[argparse.Namespace, int, str, int]) -> list[dict[str,
         det_error = relative_frobenius_error(a, det_approx)
 
         stages = _timed_rsvd(a, k1, args.oversample, args.n_power, rng)
+        # implementation-free FLOP-speedup for the first SVD (the fair metric vs wall-clock)
+        fc = cost_compare(dims.n1, dims.n2 * dims.n3, k1,
+                          min(k1 + args.oversample, dims.n1, dims.n2 * dims.n3),
+                          n_power=args.n_power, sketch="gaussian")
         return [{
             **dims.as_dict(), "ensemble": ensemble, "trial": trial,
             "oversample": args.oversample, "n_power": args.n_power,
             "det_total": det_total, "det_error": det_error, **stages,
+            "flop_speedup": fc.flop_speedup, "mem_ratio": fc.mem_ratio,
+            "wall_speedup": det_total / max(stages["rand_total"], 1e-12),
         }]
 
 
@@ -143,6 +152,8 @@ def make_plot(rows, fig_path, ensembles) -> None:
     """Rows = ensemble; columns = total time (det vs rand), rand stage breakdown, accuracy."""
     grid = [
         [
+            Panel("speedup: FLOP vs wall-clock", "d", "speedup (det / rand)", "log",
+                  _series(sub, ["flop_speedup", "wall_speedup"])),
             Panel("det vs rand total", "d", "first-SVD time (s)", "log",
                   _series(sub, ["det_total", "rand_total"])),
             Panel("rand stage breakdown", "d", "stage time (s)", "log",
@@ -153,8 +164,9 @@ def make_plot(rows, fig_path, ensembles) -> None:
         for sub in (([r for r in rows if r["ensemble"] == e]) for e in ensembles)
     ]
     write_panel_grid(fig_path, grid, row_titles=list(ensembles),
-                     col_titles=["det vs rand total", "rand stage breakdown", "accuracy"],
-                     cell_width=400, cell_height=300)
+                     col_titles=["speedup: FLOP vs wall-clock", "det vs rand total",
+                                 "rand stage breakdown", "accuracy"],
+                     cell_width=380, cell_height=300)
 
 
 def parse_args() -> argparse.Namespace:
