@@ -1,0 +1,111 @@
+# Global rMPS-sketched column QR for the Moses move — Phase-1 validation
+
+**Idea.** Replace the block Moses move's *sequential local sweep* (split each row,
+carry a residual up, peel an R-column sideways) with **one global randomized
+column QR**. View the whole active column as a single linear map
+`C_j : X_j → Y_j` (absorbed legs → retained legs); its exact factorization is
+`C_j = Q_j R_j` with `Q_j` the new isometric column and `R_j` the residual
+absorbed into the neighbour. Approximate it directly with a randomized range
+finder using **random matrix product state (rMPS)** probes (Camaño–Epperly–Meyer–Tropp,
+[`docs/rmps.pdf`](../docs/rmps.pdf)):
+
+```
+Ω  : rMPS / Gaussian test matrix over the absorbed legs       (sketch bond χ_sk)
+Y  = C_j Ω            (ℓ matrix–MPS products = the paper's access model)
+Q  = orth(Y)          (the new isometric column)
+Ĉ  = Q (Q* C_j)       (rank-ℓ column approximation;  R = Q* C_j)
+```
+
+This is a **mathematical-validation** suite on tiny *materialized* columns. The
+library is built so a real isoTNS column — which, once its top/bottom environment
+is contracted, *is* an MPO from absorbed to retained legs — reuses the same code by
+swapping one constructor. Figures live in
+[`figures/column_sketch/`](figures/column_sketch/).
+
+## The math, briefly
+
+- **rMPS (Def. 1.1).** A probe `ω ∈ F^{d_1·…·d_t}` is an MPS with iid Gaussian
+  cores, per-core variance `1/χ_sk` (interior) and `1/√χ_sk` (boundary). This makes
+  it **isotropic**, `E[ωω*] = I`, so it stands in for a dense Gaussian probe. The
+  *sketch bond* `χ_sk` is the one reliability knob (the paper's `χ`, renamed to avoid
+  colliding with the isoTNS horizontal bond).
+- **The thesis.** rMPS behaves like Gaussian **iff `χ_sk ≳ t`** (the tensor order =
+  column height `Lx`). The degenerate `χ_sk = 1` is a Gaussian-Kronecker / Khatri–Rao
+  vector `ω = g_1 ⊗ … ⊗ g_t`, which fails by *overwhelming orthogonality*
+  `|⟨x,ω⟩|² ≤ C^{-t}‖x‖²`.
+- **OSI diagnostic (sec. 5.2).** `σ_min(V_r* Ω)²` — the *oblivious subspace injection*
+  injectivity of the probe on the top-`r` right singular subspace of `C_j`. `≳ ½`
+  means a good embedding; it is the sharp leading indicator of probe quality.
+- **Guarantee (Thm 5.8).** With `Q = orth(C Ω)` and `ℓ ≳ (a+b)r`,
+  `‖C − QQ*C‖_F ≲ ‖C − ⟦C⟧_r‖_F` — the randomized column QR is within a constant of
+  the Eckart–Young optimum.
+
+## Result 1 — the `χ_sk ≳ Lx` thesis holds for the column move
+
+![Subspace injection vs column height, sketch bond, and embedding dimension](figures/column_sketch/exp01-injection.png)
+
+The OSI `σ_min(V_r* Ω)²` (left) **collapses for Kronecker (χ=1)** from ~0.12 to
+~0.012 over `Lx = 3 → 8` — heading to zero, exactly the overwhelming-orthogonality
+failure — while the dense Gaussian stays flat (~0.25) and **rMPS interpolates upward
+with χ_sk**. The middle panel shows the climb from the Kronecker floor toward the
+Gaussian reference as `χ_sk` grows at fixed `Lx`. The right panel (column error vs
+`ℓ`) is probe-independent here: on these near-flat-spectrum columns the QB error is
+set by the spectral tail, not the probe.
+
+## Result 2 — global sketch vs the sequential local Moses
+
+![Global sketch vs local Moses: column error, excess over Eckart–Young, isometry, wall-clock](figures/column_sketch/exp02-global-vs-local.png)
+
+On the *same* column at matched absorbed rank `k`, the **global flat-rank sketch hugs
+the Eckart–Young floor and is ~2.6–4× closer to optimal** (excess panel) than the
+greedy sequential local Moses. Within the global family, **rMPS (χ≥2) matches the
+dense Gaussian**; Kronecker (χ=1) begins to lag as `Lx` grows. Randomizing the local
+SVDs is accuracy-neutral (`local-det ≈ local-rand`). Every method produces a genuinely
+isometric column (defect ~1e-14). The global move uses **one** range-finder primitive
+vs the local sweep's **`Lx`** sequential SVDs; wall-clock is a *labeled secondary*
+panel — **no end-to-end speedup is claimed** (per the standing cost-model rule, that
+needs the full matrix-free algorithm including absorption).
+
+[Per-`Lx` detail](figures/column_sketch/exp01-materialized-detail.png): column error,
+excess over rank-`r`, OSI vs `χ`, and the isometry defect (≈1e-14 everywhere).
+
+## Honest assessment — what we have and have not shown
+
+**Solidly established.** (1) The machinery is *correct*: rMPS isotropy holds, `χ_sk=1`
+is the Kronecker vector exactly, the matrix-free MPO–MPS access matches the dense
+materialization to 3e-16, Gaussian recovers full rank to 1e-15, `Q` is always
+isometric. (2) We *faithfully reproduce the paper's central thesis in the column-move
+setting* — the OSI law `χ_sk ≳ Lx` (Result 1). This confirms rMPS is the right probe
+object for the Moses column.
+
+**Suggestive but qualified.** The "global beats local by 2.6–4×" result (Result 2) is
+correct as computed, but it partly reflects a *generic* fact — an optimal low-rank
+projection beats a greedy sequential one for any matrix — and it ignores the cost the
+global method must pay that the local one does not: re-expressing the dense `Q` as a
+low-bond column tensor network. So it establishes the **precondition** ("the column
+range is better captured globally") but not that the global *method* wins end to end.
+
+**Not yet shown.** (a) That rMPS's advantage over Kronecker *matters for the task* at
+reachable sizes — at `Lx ≤ 8` the downstream column error is the same for Kron, rMPS,
+and Gaussian; oversampling washes out the injectivity gap. We see the early-warning
+signal (OSI), not the failure it warns of; the catastrophic Kronecker blowup is the
+large-`Lx` regime (`n ≈ 50–70` in the paper) that materialization cannot reach. (b)
+**The decisive question** (briefing sec. 8): does `range(C_j Ω)` round into a
+*low-bond* isometric column without losing the gain? We built the seam
+(`sampled_bond_growth` shows the pre-rounding bond is exactly `D·χ_sk`) but have not
+answered it. (c) Anything about *real* isoTNS columns — all synthetic. (d) Any speedup.
+
+**Verdict.** A clean Phase-1 validation: the idea is mathematically sound and the
+tooling is real-experiment-ready. The single most important methodological conclusion
+is almost negative — *the materialized validation cannot settle the question*, because
+the interesting physics lives at `Lx ≫ 8`. The next step is therefore not more sweeps
+but the MPS-native Gram–QR (matrix-free Phase 3) that reaches that regime.
+
+## Code
+
+- `src/rand_isopeps/linalg/rmps_sketch.py` — rMPS probes (Def. 1.1); wired into `SketchSpec(kind="rmps")`.
+- `src/rand_isopeps/column/operator.py` — `ColumnOperator` access seam (`.materialize()` + matrix-free `.matvec_mps()`).
+- `src/rand_isopeps/column/global_range.py` — `global_column_range` (errors, excess, isometry, OSI) + `sampled_bond_growth`.
+- `src/rand_isopeps/column/local_moses.py` — `local_column_qr` (sequential local baseline).
+- `experiments/column_sketch/` — `exp01` (Phase 1+2), `exp02` (Phase 4), `curate_figures.py`, README.
+- Tests: `tests/test_rmps_sketch.py`, `tests/test_column_global_range.py` (full suite 43 pass).

@@ -33,8 +33,15 @@ Kinds:
   exploiting matrix-free form (applying ``A Omega`` via tensor contractions
   without forming ``Omega``) is future work. Do not claim a Khatri-Rao speedup
   from this implementation.
+* ``rmps`` -- random matrix product state sketch (Camano-Epperly-Meyer-Tropp,
+  ``docs/rmps.pdf``, Def. 1.1) over the grouped ``factor_dims``, with sketch bond
+  ``chi_sk``. ``chi_sk = 1`` is the Gaussian-Kronecker / Khatri-Rao limit (the
+  warned-about regime); ``chi_sk >~ t`` recovers Gaussian-like behaviour. The
+  canonical builder is :mod:`rand_isopeps.linalg.rmps_sketch`; same materialize-
+  and-apply caveat as ``khatri_rao`` (the matrix-free MPO--MPS form lives in
+  :mod:`rand_isopeps.column.global_range`).
 
-Only ``sparsestack`` and ``khatri_rao`` are routed here from ``rsvd_truncate``;
+Only ``sparsestack``, ``khatri_rao`` and ``rmps`` are routed here from ``rsvd_truncate``;
 the dense / countsketch fast paths stay native to ``randomized_svd`` so the
 existing experiments are byte-for-byte unchanged. The full set is implemented
 here so ``range_sample`` is a complete standalone sketch library.
@@ -48,19 +55,23 @@ from typing import Literal
 import numpy as np
 import scipy.sparse as sp
 
-SketchKind = Literal["gaussian", "rademacher", "countsketch", "sparsestack", "khatri_rao"]
+from .rmps_sketch import rmps_test_matrix
+
+SketchKind = Literal["gaussian", "rademacher", "countsketch", "sparsestack", "khatri_rao", "rmps"]
 BaseKind = Literal["gaussian", "rademacher", "spherical"]
 
 
 @dataclass(frozen=True)
 class SketchSpec:
     """Parameters of a structured sketch. ``kind`` alone reproduces the simple
-    sketches; ``zeta`` tunes sparsestack; ``factor_dims``/``base`` tune khatri_rao."""
+    sketches; ``zeta`` tunes sparsestack; ``factor_dims``/``base`` tune khatri_rao;
+    ``factor_dims``/``chi_sk`` tune rmps."""
 
     kind: SketchKind = "gaussian"
     zeta: int = 4  # sparsestack: number of stacked CountSketch blocks (= nnz per row)
-    factor_dims: tuple[int, ...] | None = None  # khatri_rao: per-factor sizes, outer..inner
+    factor_dims: tuple[int, ...] | None = None  # khatri_rao / rmps: per-factor sizes, outer..inner
     base: BaseKind = "spherical"  # khatri_rao base distribution
+    chi_sk: int = 1  # rmps: sketch bond dimension (1 == Gaussian-Kronecker / Khatri-Rao limit)
 
 
 def as_spec(sketch: "SketchKind | SketchSpec") -> SketchSpec:
@@ -157,6 +168,27 @@ def _khatri_rao(a: np.ndarray, ell: int, rng: np.random.Generator, spec: SketchS
     return a @ omega
 
 
+def _rmps(a: np.ndarray, ell: int, rng: np.random.Generator, spec: SketchSpec) -> np.ndarray:
+    """``Y = a @ Omega`` with ``Omega`` a dense rMPS test matrix (sketch bond ``chi_sk``).
+
+    Like ``_khatri_rao`` this materializes ``Omega`` and applies it as a dense
+    matmul, so it tests the *distribution's* accuracy/safety, NOT a matvec speedup
+    -- the structure-exploiting matrix-free form (``A Omega`` via MPO--MPS
+    contractions) lives in :mod:`rand_isopeps.column.global_range`. The canonical
+    builder is :func:`rand_isopeps.linalg.rmps_sketch.rmps_test_matrix`. ``chi_sk
+    = 1`` reproduces the Gaussian-Kronecker baseline (cf. ``khatri_rao`` with a
+    Gaussian base)."""
+    factor_dims = spec.factor_dims
+    if factor_dims is None or int(np.prod(factor_dims)) != a.shape[1]:
+        raise ValueError(
+            f"rmps factor_dims {factor_dims} must multiply to a.shape[1]={a.shape[1]}"
+        )
+    omega = rmps_test_matrix(
+        factor_dims, ell, spec.chi_sk, rng, normalize=True, complex_valued=_is_complex(a.dtype)
+    )
+    return a @ omega.astype(a.dtype, copy=False)
+
+
 def range_sample(a: np.ndarray, ell: int, rng: np.random.Generator, sketch: "SketchKind | SketchSpec") -> np.ndarray:
     """Apply a sketch to ``a``: return ``Y`` of shape ``(a.shape[0], w)``, ``w >= ell``
     (``w == ell`` except for sparsestack, which rounds up to ``zeta*ceil(ell/zeta)``)."""
@@ -169,4 +201,6 @@ def range_sample(a: np.ndarray, ell: int, rng: np.random.Generator, sketch: "Ske
         return _sparsestack(a, ell, rng, spec.zeta)
     if spec.kind == "khatri_rao":
         return _khatri_rao(a, ell, rng, spec)
+    if spec.kind == "rmps":
+        return _rmps(a, ell, rng, spec)
     raise ValueError(f"unknown sketch kind: {spec.kind}")
