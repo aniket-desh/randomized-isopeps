@@ -73,6 +73,8 @@ def main() -> None:
          lambda rs: argparse.Namespace(states=_state_order(rs))),
         ("exp06_structured_qr_feasibility.py", "exp6-structured-feasibility", "exp06-structured-qr-feasibility.png",
          lambda rs: argparse.Namespace(lxs=_lxs(rs), states=_state_order(rs))),
+        ("exp07_cost_comparison.py", "exp7-cost", "exp07-cost-comparison.png",
+         lambda rs: argparse.Namespace(states=_state_order(rs))),
     ):
         try:  # each needs quimb to have produced a CSV; skip cleanly if it never ran
             m = _load(mod)

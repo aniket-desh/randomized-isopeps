@@ -101,15 +101,17 @@ orthogonality-center column** (codomain = physical); interior columns differ. `r
 time-evolved — are untested). The `Lx`-growth is "random saturates the `d^Lx` cap" over 3 points, not a
 fitted volume law. These refine the framing; none overturns the green-light.
 
-## Result 4 (Stage 1) — global vs local on real columns: accuracy ties, the win is cost
+## Result 4 (Stage 1) — global vs local on real columns: accuracy ties, **and cost does not win** (negative)
 
 A theory review reframed the thesis. We are **not** sketching to enforce the isoPEPS isometry or
 to be more accurate than Moses. We sketch to make the otherwise-intractable *whole-column* QR
 tractable; an **arrow-compatible TT-SVD sweep** on the sampled range then turns it into a genuinely
-isometric isoPEPS column (each core `q_i*q_i=I` — the arrows). The honest thesis:
+isometric isoPEPS column (each core `q_i*q_i=I` — the arrows). The thesis under test was:
 
 > *a global range finder gives the **same** physical accuracy as the Moses move at **lower
 > algorithmic cost**, provided the sampled range rounds to a **low-bond isometric column**.*
+
+**Stage 1 supports the accuracy and feasibility clauses but refutes the cost clause.**
 
 **Accuracy ties (exp05).** On the real extracted column `C_j`, at matched output rank, global
 (oversampled) sits exactly at Eckart–Young while the greedy local Moses sweep carries a small excess
@@ -130,17 +132,30 @@ physical columns.
 
 ![Feasibility gate: physical range rounds to a low-bond isometric column; arrows preserved](figures/column_sketch/exp06-structured-qr-feasibility.png)
 
-**The cost case (first read).** The variational **disentangler is 86% of the local move's SVD work**
-(12 of 19 SVDs per column; the Ndis-iteration alternating minimization at each site). The global
-sketch **eliminates it** — ~ℓ matrix–MPS products + Lx TT-QR SVDs, no disentangler — and still gets a
-small carried `R`-bond *for free* because the physical column's flat rank is low (Stage 0). A full
-implementation-free FLOP tally of *both* sides (and the R-column absorption) is the natural next
-experiment, but the structural case is clear: global trades the move's dominant cost (the
-disentangler) for a cheap one-shot range capture.
+**The cost case fails (full tally, exp07).** A first read — the variational disentangler is 86% of
+the local move's SVD work — looked promising, but that 86% is 86% of a *tiny* number (the
+disentangler runs on small local tensors). The complete implementation-free FLOP tally reverses it:
+at the materializable bond (χ=8, η=4) the global method is **3–110× MORE expensive**, dominated
+(97–100%) by the sketch's ℓ matrix–MPS products on the *full* column MPO (cost ~ ℓ·Lx·D²·χ_sk²).
 
-**Stage-1 verdict:** accuracy ≈ tie (both near-optimal); the structured QR produces valid low-bond
-isometric columns; the disentangler — 86% of the local SVD work — is what the global move stands to
-remove. The project is now squarely a **cost** story, and its feasibility clause holds.
+![Cost tally: global is dominated by the sketch matvec and loses to local](figures/column_sketch/exp07-cost-comparison.png)
+
+And the natural "it wins at large bond" hypothesis is **falsified**: the ratio gets *worse* with bond
+(local/global = 0.009→0.002 as χη goes 32→200). The reason is structural — the **local move stays
+cheap regardless of allocated bond** because it operates on the *effective* (low) rank, ~constant for
+a physical column; the global matvec pays for the *allocated* bond `D` and grows ~D². There is **no
+crossover**, and even the best-case global config (χ_sk=2, small ℓ, no power iterations) only *ties*
+local at small bond.
+
+**Stage-1 verdict (honest, partly negative).** Accuracy ≈ tie (both near-optimal); the structured
+arrow-QR is correct and produces valid low-bond isometric columns (feasibility holds); **but the
+global sketch does *not* beat the local Moses move on cost — it loses, and loses more with bond.**
+The deep reason: the local move exploits *locality* and the low *effective* rank (many tiny SVDs),
+while the global sketch must apply the whole column operator ℓ times and pays for the *allocated*
+bond. **On the materializable evidence, replacing the Moses move with a global column sketch does not
+pay off** — neither accuracy nor cost favours it. What remains valuable is the bridge, the
+structured-QR machinery, and the diagnostic that *explains why* (physical columns are low-effective-
+rank and intrinsically local-friendly).
 
 ## Honest assessment — what we have and have not shown
 
