@@ -32,10 +32,14 @@ from rand_isopeps.column.structured_qr import structured_column_qr
 from rand_isopeps.experiment_utils.cost_model import gemm_flops, svd_flops
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
-from rand_isopeps.plotting import Panel, Series, write_panel_grid
+from rand_isopeps.plotting import Panel, Series, write_line_panels
 
 SUITE = "column_sketch"
 
+# Cost-decomposition series (NOT canonical method keys, so method_style does not
+# apply -- these are FLOP tallies of one column factorization, not algorithms).
+# Each "of which" breakdown reuses a lighter tint of its total's color and a
+# dotted line so it reads as a sub-component of the solid total above it.
 SERIES = {
     "local_total": ("local Moses (svd1+disent+svd2)", "#0072b2", "o", "-"),
     "local_disent": ("  of which disentangler", "#56b4e9", "v", ":"),
@@ -151,25 +155,30 @@ def _series(rows, keys):
 
 
 def make_plot(rows, fig_path, args):
-    """Rows = state; cols = FLOPs vs Lx (with disentangler/sketch breakdown), and FLOP-ratio vs Lx."""
-    grid = []
-    for state in args.states:
-        sub = [r for r in rows if r["state"] == state]
-        label = "random" if state == "random" else state.replace("tfim@", "TFIM g=")
-        xs = sorted({int(r["lx"]) for r in sub})
-        ratio = [float(np.median([float(r["flop_ratio"]) for r in sub if int(r["lx"]) == x])) for x in xs]
-        grid.append([
-            Panel(f"{label}: column-factorization FLOPs", "Lx", "FLOPs", "log",
-                  _series(sub, SERIES_ORDER)),
-            Panel(f"{label}: local/global FLOP ratio", "Lx", "local FLOPs / global FLOPs", "log",
-                  [Series(label="local/global", x=[float(x) for x in xs], y=ratio,
-                          color="#222222", marker="o")]),
-        ])
-    write_panel_grid(fig_path, grid,
-                     row_titles=["random" if s == "random" else s.replace("tfim@", "TFIM g=")
-                                 for s in args.states],
-                     col_titles=["column-factorization FLOPs (breakdown)", "local / global FLOP ratio"],
-                     cell_width=440, cell_height=300)
+    """One 2-panel figure: FLOP decomposition and the local/global FLOP ratio, vs Lx.
+
+    The FLOP tally is essentially state-INDEPENDENT (cost is driven by the column
+    bond/dimensions, not by the physical state), so faceting by state is redundant
+    dashboarding. We instead aggregate over ALL states and seeds at each Lx and take
+    medians: ``_series`` medians the four cost-decomposition series, and the ratio
+    panel medians ``flop_ratio`` per Lx. ``args`` is unused (states are aggregated;
+    Lx comes straight from the rows).
+    """
+    xs = sorted({int(r["lx"]) for r in rows})
+    ratio = [float(np.median([float(r["flop_ratio"]) for r in rows if int(r["lx"]) == x])) for x in xs]
+    panel_a = Panel(
+        "Column-factorization FLOPs", r"column height $L_x$", "FLOPs", "log",
+        _series(rows, SERIES_ORDER),
+    )
+    panel_b = Panel(
+        # title carries the directional reading so the y-label stays short/precise
+        "FLOP ratio (below 1: global costs more)", r"column height $L_x$",
+        "local FLOPs / global FLOPs", "log",
+        [Series(label="local / global", x=[float(x) for x in xs], y=ratio,
+                color="#222222", marker="o")],
+        hlines=[1.0],  # break-even: above 1 local costs more, below 1 global costs more
+    )
+    write_line_panels(fig_path, [panel_a, panel_b], width=960, height=380)
 
 
 def parse_args():

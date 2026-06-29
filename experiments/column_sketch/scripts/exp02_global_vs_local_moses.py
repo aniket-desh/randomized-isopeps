@@ -28,6 +28,7 @@ algorithm including absorption).
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import numpy as np
 
@@ -37,19 +38,23 @@ from rand_isopeps.column.local_moses import local_column_qr
 from rand_isopeps.column.operator import controlled_spectrum_column_matrix, random_column_operator
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
-from rand_isopeps.plotting import Panel, Series, write_panel_grid
+from rand_isopeps.plotting import Panel, Series, method_style, write_panel_grid
 
 SUITE = "column_sketch"
 
-# method key -> (label, kind, color, marker, linestyle). kind: ("local", randomized) or
-# ("global", sketch_kind, chi_sk).
+# method key -> (label, kind). kind: ("local", randomized) or ("global", sketch_kind,
+# chi_sk). This dict drives DATA GENERATION in ``_run_trial`` (it maps each method key
+# to the local/global + sketch + chi recipe), so it stays. Plot STYLING is *not* taken
+# from here -- ``make_plot`` routes every series through ``rand_isopeps.plotting``'s
+# canonical ``method_style`` (with the ``global_rmps8`` data key remapped to the
+# canonical ``global_rmps`` grammar) so the visual grammar lives in one module.
 METHODS = {
-    "local_det": ("local Moses (det)", ("local", False), "#0072b2", "o", "-"),
-    "local_rand": ("local Moses (rand)", ("local", True), "#56b4e9", "s", "-"),
-    "global_kron": ("global Kron (χ=1)", ("global", "kron", 1), "#d55e00", "X", ":"),
-    "global_rmps4": ("global rMPS χ=4", ("global", "rmps", 4), "#009e73", "D", "-"),
-    "global_rmps8": ("global rMPS χ=8", ("global", "rmps", 8), "#e69f00", "v", "-"),
-    "global_gauss": ("global Gaussian", ("global", "gaussian", 0), "#222222", "o", "--"),
+    "local_det": ("local Moses (det)", ("local", False)),
+    "local_rand": ("local Moses (rand)", ("local", True)),
+    "global_kron": ("global Kron (χ=1)", ("global", "kron", 1)),
+    "global_rmps4": ("global rMPS χ=4", ("global", "rmps", 4)),
+    "global_rmps8": ("global rMPS χ=8", ("global", "rmps", 8)),
+    "global_gauss": ("global Gaussian", ("global", "gaussian", 0)),
 }
 METHOD_ORDER = list(METHODS)
 
@@ -122,44 +127,93 @@ def run(args: argparse.Namespace) -> tuple[str, str]:
     return csv_path, fig_path
 
 
-def _method_series(rows, value_key):
-    present = [m for m in METHOD_ORDER if any(r["method"] == m for r in rows)]
+# Trimmed main-figure method set (PLOT.md: <=4-5 methods per panel). Each entry maps a
+# DATA key in the CSV's ``method`` column to the canonical STYLE key looked up via
+# ``method_style``. ``global_rmps8`` (chi=8 rMPS, the deployed probe) carries the
+# canonical ``global_rmps`` grammar (green diamond, label "rMPS"); ``global_rmps4`` and
+# ``global_kron`` are dropped from these figures to keep the comparison legible.
+_PLOT_METHODS: dict[str, str] = {
+    "global_gauss": "global_gauss",
+    "global_rmps8": "global_rmps",
+    "local_det": "local_det",
+    "local_rand": "local_rand",
+}
+# Legend order: gold-standard dense Gaussian, then the rMPS probe, then the two local
+# Moses variants (mirrors plotting.METHOD_ORDER minus the dropped probes).
+_PLOT_ORDER = ["global_gauss", "global_rmps8", "local_det", "local_rand"]
+
+
+def _method_series(rows, value_key, *, floor: float | None = None):
+    """Median+IQR series over trials for the trimmed method set, styled canonically.
+
+    Each present DATA key is summarized with :func:`median_band` and assigned its
+    ``(label, color, marker, linestyle)`` from :func:`method_style` (the ``global_rmps8``
+    -> ``global_rmps`` remap lives in ``_PLOT_METHODS``). ``floor`` clamps the median and
+    band to a positive value so error/excess curves never hit 0 on the log axis.
+    """
+    present = [m for m in _PLOT_ORDER if any(r["method"] == m for r in rows)]
     bands = median_band(rows, group_key="method", x_key="k", value_key=value_key, group_order=present)
     out = []
-    for key, (xs, med, lo, hi) in bands.items():
-        label, _, color, marker, ls = METHODS[key]
+    for data_key, (xs, med, lo, hi) in bands.items():
+        label, color, marker, ls = method_style(_PLOT_METHODS[data_key])
+        if floor is not None:
+            med = [max(float(v), floor) for v in med]
+            lo = [max(float(v), floor) for v in lo]
+            hi = [max(float(v), floor) for v in hi]
         out.append(Series(label=label, x=[float(v) for v in xs], y=med, ylow=lo, yhigh=hi,
                           color=color, marker=marker, linestyle=ls))
     return out
 
 
 def _ey_series(rows):
-    """The Eckart-Young floor vs k (a probe-independent reference line on the error panel)."""
+    """Eckart-Young floor vs k -- the optimal rank-k error, a probe-independent reference.
+
+    Styled as the canonical ``eckart_young`` floor: gray dotted line with NO markers (the
+    grammar's empty-string marker), so it reads as a baseline rather than a method.
+    """
+    label, color, marker, ls = method_style("eckart_young")
     ks = sorted({int(r["k"]) for r in rows})
-    ys = [float(np.median([float(r["ey_floor"]) for r in rows if int(r["k"]) == k])) for k in ks]
-    return [Series(label="Eckart-Young floor", x=[float(k) for k in ks], y=ys,
-                   color="#999999", marker="o", linestyle=":")]
+    ys = [max(float(np.median([float(r["ey_floor"]) for r in rows if int(r["k"]) == k])), 1e-16)
+          for k in ks]
+    return [Series(label=label, x=[float(k) for k in ks], y=ys,
+                   color=color, marker=marker, linestyle=ls)]
 
 
 def make_plot(rows, fig_path, args) -> None:
-    """Rows = Lx; cols = column error vs k (+EY floor), excess over EY, isometry, runtime."""
-    grid = []
+    """Render the global-vs-local accuracy figures, faceted by column height ``Lx``.
+
+    MAIN (``fig_path``): a rows=Lx x 2-col grid -- column error vs k (with the
+    Eckart-Young floor) and excess over that floor -- for the trimmed method set
+    (Gaussian, rMPS, local det, local rand). A SECONDARY ``-diagnostics`` figure holds
+    the isometry-defect sanity check (with a 1e-12 threshold line) and the wall-clock
+    secondary metric, so the headline accuracy claim is not buried in a 4-wide grid.
+    """
+    main = []
     for lx in args.lxs:
         sub = [r for r in rows if int(r["lx"]) == lx]
-        grid.append([
-            Panel("column error", "absorbed rank k", r"$\|C-QR\|_F/\|C\|_F$", "log",
-                  _method_series(sub, "rel_error") + _ey_series(sub)),
-            Panel("excess over Eckart-Young", "absorbed rank k", "excess (method − optimal)", "log",
-                  _method_series(sub, "excess_error")),
-            Panel("isometry defect (sanity)", "absorbed rank k", r"$\|Q^*Q-I\|_F$", "log",
-                  _method_series(sub, "isometry_defect")),
-            Panel("wall-clock (secondary)", "absorbed rank k", "runtime (s)", "log",
+        main.append([
+            Panel("Column error", "absorbed rank $k$", r"$\|C-QR\|_F/\|C\|_F$", "log",
+                  _method_series(sub, "rel_error", floor=1e-16) + _ey_series(sub)),
+            Panel("Excess over Eckart-Young", "absorbed rank $k$", "error $-$ optimal", "log",
+                  _method_series(sub, "excess_error", floor=1e-16)),
+        ])
+    write_panel_grid(fig_path, main, row_titles=[f"Lx={lx}" for lx in args.lxs],
+                     col_titles=["Column error (+ EY floor)", "Excess over Eckart-Young"],
+                     cell_width=420, cell_height=300)
+
+    diag = []
+    for lx in args.lxs:
+        sub = [r for r in rows if int(r["lx"]) == lx]
+        diag.append([
+            Panel("Isometry defect (sanity)", "absorbed rank $k$", r"$\|Q^*Q-I\|_F$", "log",
+                  _method_series(sub, "isometry_defect", floor=1e-17), hlines=[1e-12]),
+            Panel("Wall-clock (secondary)", "absorbed rank $k$", "runtime (s)", "log",
                   _method_series(sub, "runtime_s")),
         ])
-    write_panel_grid(fig_path, grid, row_titles=[f"Lx={lx}" for lx in args.lxs],
-                     col_titles=["column error (+ EY floor)", "excess over Eckart-Young",
-                                 "isometry defect (sanity)", "wall-clock (secondary)"],
-                     cell_width=380, cell_height=300)
+    sec = str(Path(fig_path).with_name(Path(fig_path).stem + "-diagnostics" + ".pdf"))
+    write_panel_grid(sec, diag, row_titles=[f"Lx={lx}" for lx in args.lxs],
+                     col_titles=["Isometry defect (sanity)", "Wall-clock (secondary)"],
+                     cell_width=420, cell_height=300)
 
 
 def parse_args() -> argparse.Namespace:

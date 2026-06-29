@@ -28,19 +28,37 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullFormatter, ScalarFormatter
 
 
-# Okabe-Ito colorblind-safe palette, keyed by experiment series name.
-PALETTE = {
-    "det": "#0072b2",          # blue
-    "rand_first": "#d55e00",   # vermillion
-    "rand_second": "#009e73",  # bluish green
-    "rand_both": "#cc79a7",    # reddish purple
-    "zipup_svd": "#0072b2",
-    "randomized": "#d55e00",
-    "src": "#009e73",          # bluish green
+# =============================================================================
+# Canonical visual grammar (docs/PLOT.md).
+#
+# One color/marker/linestyle per *method* across every figure in the project, so
+# the same algorithm reads the same way everywhere. Baselines/floors are gray and
+# dashed/dotted; the algorithmic comparison gets the saturated colors. Experiment
+# scripts should look styles up through ``method_style`` / ``state_style`` rather
+# than hand-coding hex, so the grammar stays in this one module.
+# =============================================================================
+
+# method key -> hex color (Okabe-Ito colorblind-safe; gray for floors).
+COLORS = {
+    "local_det": "#0072b2",      # blue
+    "local_rand": "#56b4e9",     # sky blue
+    "global_gauss": "#222222",   # near-black (gold-standard dense probe)
+    "global_rmps": "#009e73",    # bluish green (the method)
+    "global_kron": "#d55e00",    # vermillion (chi=1 weak baseline)
+    "eckart_young": "#888888",   # gray (optimal floor)
 }
 
-# Series name -> matplotlib marker code.
+# method key -> marker ("" / None means a line with no markers, e.g. a floor).
+# Legacy synthetic_kernels series keys are merged in (no overlap with the canonical
+# method keys) so older suites keep importing ``MARKERS``/``PALETTE`` unchanged.
 MARKERS = {
+    "local_det": "o",
+    "local_rand": "s",
+    "global_gauss": "o",
+    "global_rmps": "D",
+    "global_kron": "X",
+    "eckart_young": "",
+    # --- legacy synthetic_kernels keys (back-compat) ---
     "det": "o",
     "rand_first": "s",
     "rand_second": "^",
@@ -50,29 +68,120 @@ MARKERS = {
     "src": "^",
 }
 
-# Accept both the legacy descriptive names and matplotlib codes.
+# Legacy Okabe-Ito palette keyed by synthetic_kernels series name (back-compat for
+# suites that still import ``PALETTE`` directly). New code uses ``COLORS`` above.
+PALETTE = {
+    "det": "#0072b2",
+    "rand_first": "#d55e00",
+    "rand_second": "#009e73",
+    "rand_both": "#cc79a7",
+    "zipup_svd": "#0072b2",
+    "randomized": "#d55e00",
+    "src": "#009e73",
+}
+
+# method key -> linestyle (solid = primary method, dashed/dotted = reference).
+LINESTYLES = {
+    "local_det": "-",
+    "local_rand": "-",
+    "global_gauss": "--",
+    "global_rmps": "-",
+    "global_kron": ":",
+    "eckart_young": ":",
+}
+
+# Short legend labels -- detailed settings (oversample, n_power, chi_sk) belong in
+# the caption/filename, never the legend.
+LABELS = {
+    "local_det": "Local det.",
+    "local_rand": "Local rand.",
+    "global_gauss": "Gaussian",
+    "global_rmps": "rMPS",
+    "global_kron": r"Kron $\chi$=1",
+    "eckart_young": "EY floor",
+}
+
+# Intentional legend order (not alphabetical): floor, then global probes, then local.
+METHOD_ORDER = [
+    "eckart_young",
+    "global_gauss",
+    "global_rmps",
+    "global_kron",
+    "local_det",
+    "local_rand",
+]
+
+# Physical-state grammar for the column_sketch suite (random worst-case vs the
+# TFIM ground states). ``critical`` (the 2D-TFIM critical point g~3.04) gets the
+# orange accent; the deeper paramagnet g=3.5 the purple; random the gray baseline.
+STATE_COLORS = {
+    "random": "#888888",     # gray (flat / worst case)
+    "tfim": "#7b3294",       # purple
+    "critical": "#e66101",   # orange (critical point)
+}
+
+
+def method_style(key: str) -> tuple[str, str, str, str]:
+    """``(label, color, marker, linestyle)`` for a canonical method key.
+
+    Falls back to a neutral gray solid ``o`` for unknown keys so a new series
+    still renders (just without a reserved slot in the grammar)."""
+    return (
+        LABELS.get(key, key),
+        COLORS.get(key, "#444444"),
+        MARKERS.get(key, "o"),
+        LINESTYLES.get(key, "-"),
+    )
+
+
+def state_style(state: str) -> tuple[str, str, str, str]:
+    """``(label, color, marker, linestyle)`` for a column_sketch state key.
+
+    ``"random"`` -> gray dashed square (the flat worst case); ``"tfim@g"`` ->
+    a solid line, orange+diamond at/near the critical point (``g <~ 3.1``) and
+    purple+circle in the deeper paramagnet, with a ``"TFIM g=.."`` label."""
+    if state == "random":
+        return ("random", STATE_COLORS["random"], "s", "--")
+    g = state.split("@")[1] if "@" in state else state
+    try:
+        critical = float(g) <= 3.1
+    except ValueError:
+        critical = False
+    if critical:
+        return (f"TFIM g={g}", STATE_COLORS["critical"], "D", "-")
+    return (f"TFIM g={g}", STATE_COLORS["tfim"], "o", "-")
+
+
+# Accept legacy descriptive marker names and matplotlib codes interchangeably; ""
+# / None / "none" mean "draw a line with no markers" (used for floors).
 _MARKER_ALIASES = {
     "circle": "o",
     "square": "s",
     "triangle": "^",
     "diamond": "D",
+    "": None,
+    "none": None,
+    "None": None,
 }
 
 
-def _apply_style() -> None:
-    """Set rcParams for a clean, restrained research-plot look."""
+def apply_paper_style() -> None:
+    """Set rcParams for the restrained NLA-paper look of ``docs/PLOT.md``.
+
+    White background, small sans-serif type, thin spines (top/right hidden),
+    frameless legends, vector-friendly defaults, and 300-dpi PNG export.
+    """
     plt.rcParams.update(
         {
             "figure.dpi": 150,
-            "savefig.dpi": 150,
+            "savefig.dpi": 300,
             "savefig.bbox": "tight",
-            "savefig.pad_inches": 0.12,
+            "savefig.pad_inches": 0.05,
             "font.family": "sans-serif",
             "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
-            "font.size": 10,
-            "axes.titlesize": 11,
-            "axes.titleweight": "semibold",
-            "axes.labelsize": 10,
+            "font.size": 9,
+            "axes.titlesize": 9,
+            "axes.labelsize": 9,
             "axes.linewidth": 0.8,
             "axes.edgecolor": "#444444",
             "axes.labelcolor": "#222222",
@@ -80,17 +189,57 @@ def _apply_style() -> None:
             "axes.spines.right": False,
             "xtick.color": "#444444",
             "ytick.color": "#444444",
-            "xtick.labelsize": 9,
-            "ytick.labelsize": 9,
+            "xtick.labelsize": 8,
+            "ytick.labelsize": 8,
             "xtick.direction": "out",
             "ytick.direction": "out",
-            "legend.fontsize": 9,
+            "legend.fontsize": 8,
             "legend.frameon": False,
-            "lines.linewidth": 1.6,
-            "lines.markersize": 5.5,
-            "lines.markeredgewidth": 0.8,
+            "lines.linewidth": 1.5,
+            "lines.markersize": 4.5,
+            "lines.markeredgewidth": 0.7,
         }
     )
+
+
+# Back-compat alias: the renderers below and a few callers still say _apply_style.
+_apply_style = apply_paper_style
+
+
+def clean_axis(ax, *, ylog: bool = False, xlog: bool = False) -> None:
+    """Apply the shared per-axis treatment from ``docs/PLOT.md``.
+
+    Hides the top/right spines, sets light major (and, on log-y, minor) grids,
+    and short outward ticks. ``ylog``/``xlog`` switch the corresponding scale to
+    base-10 log. Use this when drawing a bare matplotlib ``Axes`` directly; the
+    ``Panel`` renderers below already apply the equivalent styling.
+    """
+    if ylog:
+        ax.set_yscale("log")
+    if xlog:
+        ax.set_xscale("log")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(True, which="major", color="#e6e6e6", linewidth=0.7)
+    if ylog:
+        ax.grid(True, which="minor", axis="y", color="#f2f2f2", linewidth=0.5)
+    ax.tick_params(direction="out", length=3, width=0.8, colors="#444444")
+    ax.set_axisbelow(True)
+
+
+def savefig(fig, path: str | Path) -> Path:
+    """Save ``fig`` as BOTH ``.pdf`` (vector, for papers) and ``.png`` (300 dpi,
+    for README/quick viewing), per ``docs/PLOT.md``.
+
+    Any suffix on ``path`` is replaced; the parent directory is created. Returns
+    the ``.pdf`` path. ``bbox_inches``/``pad_inches`` come from the active style.
+    """
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pdf = out.with_suffix(".pdf")
+    fig.savefig(pdf)
+    fig.savefig(out.with_suffix(".png"), dpi=300)
+    return pdf
 
 
 @dataclass(frozen=True)
@@ -116,6 +265,7 @@ class Panel:
     yscale: Literal["linear", "log"]
     series: list[Series]
     vlines: list[float] | None = None  # optional vertical reference lines (e.g. k1, k2)
+    hlines: list[float] | None = None  # optional horizontal reference lines (e.g. sanity 1e-12)
 
 
 def _log_span_decades(panel: Panel) -> float:
@@ -172,6 +322,8 @@ def _draw_panel(ax, panel: Panel, legend: dict[str, Line2D]) -> None:
 
     for xv in panel.vlines or []:
         ax.axvline(xv, color="#888888", linestyle="--", linewidth=0.8, zorder=2)
+    for yv in panel.hlines or []:
+        ax.axhline(yv, color="#888888", linestyle="--", linewidth=0.8, zorder=2)
 
     ax.set_xlabel(panel.xlabel, labelpad=4)
     ax.set_ylabel(panel.ylabel, labelpad=5)
@@ -250,7 +402,7 @@ def write_line_panels(
         ax.set_title(panel.title, pad=8, loc="left")
 
     _shared_legend(fig, legend)
-    fig.savefig(out)
+    savefig(fig, out)
     plt.close(fig)
     return out
 
@@ -298,7 +450,7 @@ def write_panel_grid(
             _row_header(axes[r][0], row_titles[r])
 
     _shared_legend(fig, legend)
-    fig.savefig(out)
+    savefig(fig, out)
     plt.close(fig)
     return out
 
@@ -429,7 +581,7 @@ def write_scatter_grid(
     cbar = fig.colorbar(sm, ax=axes.ravel().tolist(), label=clabel,
                         shrink=0.82, pad=0.035, fraction=0.045)
     cbar.ax.tick_params(length=3)
-    fig.savefig(out)
+    savefig(fig, out)
     plt.close(fig)
     return out
 

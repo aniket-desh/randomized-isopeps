@@ -101,7 +101,7 @@ orthogonality-center column** (codomain = physical); interior columns differ. `r
 time-evolved — are untested). The `Lx`-growth is "random saturates the `d^Lx` cap" over 3 points, not a
 fitted volume law. These refine the framing; none overturns the green-light.
 
-## Result 4 (Stage 1) — global vs local on real columns: accuracy ties, **and cost does not win** (negative)
+## Result 4 (Stage 1) — global vs local on real columns: accuracy ties, **and cost ties at matched accuracy** (revised)
 
 A theory review reframed the thesis. We are **not** sketching to enforce the isoPEPS isometry or
 to be more accurate than Moses. We sketch to make the otherwise-intractable *whole-column* QR
@@ -111,7 +111,8 @@ isometric isoPEPS column (each core `q_i*q_i=I` — the arrows). The thesis unde
 > *a global range finder gives the **same** physical accuracy as the Moses move at **lower
 > algorithmic cost**, provided the sampled range rounds to a **low-bond isometric column**.*
 
-**Stage 1 supports the accuracy and feasibility clauses but refutes the cost clause.**
+**Stage 1 supports the accuracy and feasibility clauses; the cost clause is a tie at matched accuracy,
+not the refutation an earlier fixed-operating-point read suggested.**
 
 **Accuracy ties (exp05).** On the real extracted column `C_j`, at matched output rank, global
 (oversampled) sits exactly at Eckart–Young while the greedy local Moses sweep carries a small excess
@@ -132,30 +133,44 @@ physical columns.
 
 ![Feasibility gate: physical range rounds to a low-bond isometric column; arrows preserved](figures/column_sketch/exp06-structured-qr-feasibility.png)
 
-**The cost case fails (full tally, exp07).** A first read — the variational disentangler is 86% of
-the local move's SVD work — looked promising, but that 86% is 86% of a *tiny* number (the
-disentangler runs on small local tensors). The complete implementation-free FLOP tally reverses it:
-at the materializable bond (χ=8, η=4) the global method is **3–110× MORE expensive**, dominated
-(97–100%) by the sketch's ℓ matrix–MPS products on the *full* column MPO (cost ~ ℓ·Lx·D²·χ_sk²).
+**Cost at a *fixed* operating point looks bad (exp07) — but that point is overkill.** The complete
+implementation-free FLOP tally at a hard-coded `ℓ=η+6, q=1, χ_sk=8` (η_q fixed at η=4) makes global
+**3–110× MORE expensive**, dominated (97–100%) by the sketch's ℓ matrix–MPS products
+(cost ~ ℓ·Lx·D²·χ_sk²). NB this is *already the matrix-free count* — exp07 charges the per-core
+MPO–MPS work `Σ 2·D²·χ_sk²·o·s`, **not** a dense `CΩ` — and the local baseline is the *real* block
+Moses including the disentangler (`moses_move`+`MosesStats`, svd1+disentangler+svd2). So the loss is
+not a dense-prototype artifact. The flaw is the **fixed operating point**: ℓ=10, q=1, χ_sk=8 is
+massive overkill for an effective-rank-≈2 physical column.
 
-![Cost tally: global is dominated by the sketch matvec and loses to local](figures/column_sketch/exp07-cost-comparison.png)
+![Cost at a fixed operating point: global dominated by the sketch matvec](figures/column_sketch/exp07-cost-comparison.png)
 
-And the natural "it wins at large bond" hypothesis is **falsified**: the ratio gets *worse* with bond
-(local/global = 0.009→0.002 as χη goes 32→200). The reason is structural — the **local move stays
-cheap regardless of allocated bond** because it operates on the *effective* (low) rank, ~constant for
-a physical column; the global matvec pays for the *allocated* bond `D` and grows ~D². There is **no
-crossover**, and even the best-case global config (χ_sk=2, small ℓ, no power iterations) only *ties*
-local at small bond.
+**At MATCHED accuracy, the cost ties (exp08).** The honest comparison is *cost to reach the local
+move's accuracy*. For each physical column we search the cheapest global config (ℓ∈{η−2..η+8},
+q∈{0,1}, χ_sk∈{4,8}, and — since global has **no disentangler** — vertical bond η_q free to grow)
+whose structured-QR `eps_proj` ties local's error, with the TT-QR and residual `R` *also* modeled
+matrix-free (bounded by the product-MPS bond ℓ·D·χ_sk, not the dense output dim). Result on converged
+TFIM columns (η=4, lx 3→5, 3 seeds): global **matches local's accuracy 18/18**, at a chosen
+`q*=0, χ_sk*=4` (no power iteration, small sketch) — and the cost ratio **local/global climbs
+0.08 → 1.3 → 1.0 across lx=3→4→5, crossing break-even at lx=4.** The exp07 fixed point stays at
+0.01–0.12 throughout.
 
-**Stage-1 verdict (honest, partly negative).** Accuracy ≈ tie (both near-optimal); the structured
-arrow-QR is correct and produces valid low-bond isometric columns (feasibility holds); **but the
-global sketch does *not* beat the local Moses move on cost — it loses, and loses more with bond.**
-The deep reason: the local move exploits *locality* and the low *effective* rank (many tiny SVDs),
-while the global sketch must apply the whole column operator ℓ times and pays for the *allocated*
-bond. **On the materializable evidence, replacing the Moses move with a global column sketch does not
-pay off** — neither accuracy nor cost favours it. What remains valuable is the bridge, the
-structured-QR machinery, and the diagnostic that *explains why* (physical columns are low-effective-
-rank and intrinsically local-friendly).
+![Matched-accuracy matrix-free cost: local rises and is caught by global at lx≥4](figures/column_sketch/exp08-matched-accuracy-cost.png)
+
+**Stage-1 verdict (revised — a tie, with one real caveat).** Accuracy ≈ tie; feasibility holds; and
+**at matched accuracy the per-column cost is a tie** (ratio ≈ 1 at lx=4–5), *not* the 3–110× loss the
+fixed-point read implied. exp07's "loses worse with bond / no crossover" was an artifact of fixing the
+operating point and η_q; local's cost actually grows *faster* with Lx (5.8e3→3.2e5 over lx=3→5) and is
+caught by global. **Caveats that keep this from being a clean win:** (1) lx=3 is a degenerate match —
+local is absurdly accurate (~1e-8) on a trivial column, so global can only "match" by going to full
+rank (η_q=8=n_out); the meaningful tie rests on just **lx=4 and 5** (two points), with the
+materialization ceiling (lx≲5–6) blocking extrapolation. (2) **The disentangler is not redundant
+overhead** — global ties local's accuracy only by spending a *higher vertical bond* (η_q=6–8 vs local
+η=4), because the disentangler is precisely what lets the local column hit that accuracy at bond 4. A
+fatter output column has a **downstream sweep cost** (bigger R, fatter neighbour) that this per-column
+tally does not charge. So global trades "no disentangler" for "fatter column"; whether the sketch
+saving beats the fatter-bond propagation end-to-end is the open question — the per-column experiment
+ties, but cannot settle the full-sweep accounting. What is now solid: the global sketch is
+**cost-competitive per column** on physical columns, a real upgrade over the earlier negative.
 
 ## Honest assessment — what we have and have not shown
 

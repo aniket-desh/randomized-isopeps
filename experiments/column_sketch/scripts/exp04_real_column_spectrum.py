@@ -31,15 +31,14 @@ mathematical-validation diagnostic, not a speedup claim.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import numpy as np
-from matplotlib import colormaps
-from matplotlib.colors import to_hex
 
 from rand_isopeps.column.from_quimb import from_quimb_column
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
-from rand_isopeps.plotting import Panel, Series, write_line_panels
+from rand_isopeps.plotting import Panel, Series, state_style, write_line_panels
 
 SUITE = "column_sketch"
 
@@ -124,16 +123,6 @@ def run(args):
     return csv_path, fig_path
 
 
-def _state_color(states):
-    out = {}
-    cmap = colormaps["plasma"]
-    tfim = [s for s in states if s != "random"]
-    for i, s in enumerate(tfim):
-        out[s] = to_hex(cmap(0.15 + 0.6 * (i / max(len(tfim) - 1, 1))))
-    out["random"] = "#888888"
-    return out
-
-
 def _median_vs_lx(rows, state, key, lxs):
     ys = []
     for lx in lxs:
@@ -153,44 +142,56 @@ def _rep_spectrum(rows, state, lx, field):
     return [float(v) for v in pick[field].split(";") if v]
 
 
+def _vs_lx_series(rows, states, key, lxs):
+    """One Series per state of the per-Lx median of ``key``, styled via state_style."""
+    out = []
+    for s in states:
+        label, color, marker, linestyle = state_style(s)
+        out.append(Series(label=label, x=[float(x) for x in lxs],
+                          y=_median_vs_lx(rows, s, key, lxs),
+                          color=color, marker=marker, linestyle=linestyle))
+    return out
+
+
 def make_plot(rows, fig_path, args):
+    """Two clean 2-panel figures (docs/PLOT.md section 3).
+
+    MAIN (fig_path): the headline decay story -- a representative column
+    spectrum at the largest Lx (A) and how the column's effective rank scales
+    with column height (B). SECONDARY (``-diagnostics``): the truncation /
+    move-anchored sanity checks kept out of the headline.
+    """
     states = list(args.states)
-    color = _state_color(states)
     lxs = sorted({int(r["lx"]) for r in rows})
     max_lx = max(lxs)
 
-    def style(s):
-        return ("random" if s == "random" else s.replace("tfim@", "TFIM g="),
-                color[s], ("s" if s == "random" else "o"), ("--" if s == "random" else "-"))
-
-    # Panel 1: representative column C_j spectrum at the largest Lx (the headline decay gap)
-    p1 = []
+    # --- MAIN: column spectrum decay + effective-rank scaling ----------------
+    spectrum_series = []
     for s in states:
         spec = _rep_spectrum(rows, s, max_lx, "col_spectrum")
         if spec:
-            label, c, m, ls = style(s)
-            p1.append(Series(label=label, x=list(range(1, len(spec) + 1)), y=spec,
-                             color=c, marker=m, linestyle=ls))
-    # Panel 2: column flat rank (eff rank to 99%) vs Lx
-    p2 = [Series(label=style(s)[0], x=[float(x) for x in lxs],
-                 y=_median_vs_lx(rows, s, "col_eff_rank99", lxs),
-                 color=style(s)[1], marker=style(s)[2], linestyle=style(s)[3]) for s in states]
-    # Panel 3: truncation losslessness -- top-eta mass fraction vs Lx
-    p3 = [Series(label=style(s)[0], x=[float(x) for x in lxs],
-                 y=_median_vs_lx(rows, s, "col_top_eta_frac", lxs),
-                 color=style(s)[1], marker=style(s)[2], linestyle=style(s)[3]) for s in states]
-    # Panel 4: move-anchored svd2 eff rank vs Lx (the gauge-free cross-check)
-    p4 = [Series(label=style(s)[0], x=[float(x) for x in lxs],
-                 y=_median_vs_lx(rows, s, "svd2_eff_rank99", lxs),
-                 color=style(s)[1], marker=style(s)[2], linestyle=style(s)[3]) for s in states]
-
-    panels = [
-        Panel(f"column $C_j$ spectrum (Lx={max_lx})", "singular index", r"$\sigma_i/\sigma_1$", "log", p1),
-        Panel("column flat rank vs Lx", "column height Lx", "eff. rank (99% energy)", "log", p2),
-        Panel(rf"truncation to $\eta$={args.eta}: kept mass", "column height Lx", r"top-$\eta$ mass frac", "linear", p3),
-        Panel(rf"move svd2 rank vs Lx", "column height Lx", "svd2 eff. rank (99%)", "log", p4),
+            label, color, marker, linestyle = state_style(s)
+            spectrum_series.append(Series(
+                label=label, x=list(range(1, len(spec) + 1)), y=spec,
+                color=color, marker=marker, linestyle=linestyle))
+    main_panels = [
+        Panel("Column spectrum", r"singular index $i$", r"$\sigma_i/\sigma_1$",
+              "log", spectrum_series),
+        Panel("Column effective rank", r"column height $L_x$", "eff. rank (99% energy)",
+              "linear", _vs_lx_series(rows, states, "col_eff_rank99", lxs)),
     ]
-    write_line_panels(fig_path, panels, width=1280, height=360)
+    write_line_panels(fig_path, main_panels, width=680, height=300)
+
+    # --- SECONDARY: truncation kept-mass + move-anchored svd2 rank -----------
+    sec = str(Path(fig_path).with_name(Path(fig_path).stem + "-diagnostics" + ".pdf"))
+    sec_panels = [
+        Panel(rf"Kept mass in top $\eta$={args.eta}", r"column height $L_x$",
+              r"top-$\eta$ mass frac", "linear",
+              _vs_lx_series(rows, states, "col_top_eta_frac", lxs)),
+        Panel("Move svd2 effective rank", r"column height $L_x$", "svd2 eff. rank (99%)",
+              "linear", _vs_lx_series(rows, states, "svd2_eff_rank99", lxs)),
+    ]
+    write_line_panels(sec, sec_panels, width=680, height=300)
 
 
 def parse_args():

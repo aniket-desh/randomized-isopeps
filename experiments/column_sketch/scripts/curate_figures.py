@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Render curated headline PNGs for the column_sketch suite into reports/figures/.
+"""Render curated headline figures for the column_sketch suite into reports/figures/.
 
 Reads the most recent sweep CSVs from ``outputs/column_sketch/data/`` and re-renders
-the headline panels (reusing each experiment's own plot functions) as committed PNGs
-under ``reports/figures/column_sketch/``, the tracked figure location. Run after a
-full sweep:
+the headline panels (reusing each experiment's own plot functions) as committed
+figures under ``reports/figures/column_sketch/``, the tracked figure location. Per
+``docs/PLOT.md`` every figure is written as BOTH ``.pdf`` (vector, papers) and ``.png``
+(README), and several experiments now emit a SECONDARY figure beside the main one
+(``-diagnostics`` / ``-sanity``) -- those land in the same directory automatically
+because the plot helpers derive sibling paths and ``savefig`` writes both formats.
+Run after a full sweep:
 
     python experiments/column_sketch/scripts/exp01_materialized_column_rmps.py --lxs 3 4 5 6 7 8 --trials 16
     python experiments/column_sketch/scripts/exp02_global_vs_local_moses.py   --lxs 4 5 6 7   --trials 16
@@ -75,6 +79,8 @@ def main() -> None:
          lambda rs: argparse.Namespace(lxs=_lxs(rs), states=_state_order(rs))),
         ("exp07_cost_comparison.py", "exp7-cost", "exp07-cost-comparison.png",
          lambda rs: argparse.Namespace(states=_state_order(rs))),
+        ("exp08_matched_accuracy_cost.py", "exp8-matched-cost", "exp08-matched-accuracy-cost.png",
+         lambda rs: argparse.Namespace()),  # make_plot reads only the rows
     ):
         try:  # each needs quimb to have produced a CSV; skip cleanly if it never ran
             m = _load(mod)
@@ -84,8 +90,17 @@ def main() -> None:
         except SystemExit:
             print(f"  (skipping {png} -- no {prefix} CSV found)")
 
-    for name in names:
-        print(f"  wrote reports/figures/column_sketch/{name}")
+    # ``names`` tracks the figures we explicitly asked each experiment to render; the
+    # plot helpers also emit a ``.pdf`` twin and (for some experiments) a ``-sanity`` /
+    # ``-diagnostics`` sibling. List everything actually written so the report is honest.
+    written = sorted(os.path.basename(p) for p in glob.glob(os.path.join(DEST, "*"))
+                     if p.lower().endswith((".png", ".pdf")))
+    print(f"\n  {len(written)} files in reports/figures/column_sketch/ "
+          f"({sum(n.endswith('.png') for n in written)} png + "
+          f"{sum(n.endswith('.pdf') for n in written)} pdf):")
+    for name in written:
+        flag = "" if name in names or name.replace(".pdf", ".png") in names else "  (secondary)"
+        print(f"    {name}{flag}")
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ the structured sweep preserves the arrows by construction, the whole point of th
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import numpy as np
 
@@ -37,15 +38,9 @@ from rand_isopeps.column.from_quimb import find_center_column, from_quimb_column
 from rand_isopeps.column.structured_qr import structured_column_qr
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
-from rand_isopeps.plotting import Panel, Series, write_panel_grid
+from rand_isopeps.plotting import Panel, Series, state_style, write_line_panels
 
 SUITE = "column_sketch"
-
-STATE_STYLE = {
-    "random": ("random", "#888888", "s", "--"),
-    "tfim@3.5": ("TFIM g=3.5", "#7b3294", "o", "-"),
-    "tfim@3.04": ("TFIM g=3.04", "#e66101", "D", "-"),
-}
 
 
 def _prepare_state(args, kind, lx, seed):
@@ -92,12 +87,18 @@ def run(args):
 
 
 def _series(rows, value_key, lx, floor=0.0):
+    """Median+IQR bands over seeds at a fixed Lx, one Series per physical state.
+
+    The comparison axis is the state (random worst case vs TFIM ground states), so
+    each curve gets its canonical ``state_style`` color/marker. ``random`` is kept
+    first for a stable legend order; ``floor`` clips for safe log-axis rendering.
+    """
     sub = [r for r in rows if int(r["lx"]) == lx]
-    present = [s for s in STATE_STYLE if any(r["state"] == s for r in sub)]
+    present = sorted({r["state"] for r in sub}, key=lambda s: (s != "random", s))
     bands = median_band(sub, group_key="state", x_key="eta_q", value_key=value_key, group_order=present)
     out = []
     for key, (xs, med, lo, hi) in bands.items():
-        label, color, marker, ls = STATE_STYLE[key]
+        label, color, marker, ls = state_style(key)
         out.append(Series(label=label, x=[float(v) for v in xs], y=[max(m, floor) for m in med],
                           ylow=[max(v, floor) for v in lo], yhigh=[max(v, floor) for v in hi],
                           color=color, marker=marker, linestyle=ls))
@@ -105,23 +106,33 @@ def _series(rows, value_key, lx, floor=0.0):
 
 
 def make_plot(rows, fig_path, args):
-    """Rows = Lx; cols = eps_proj, tau_round, isometry defect, final R-bond -- all vs eta_q."""
-    grid = []
-    for lx in args.lxs:
-        grid.append([
-            Panel(f"Lx={lx}: range capture", r"vertical bond $\eta_Q$",
-                  r"$\|(I-QQ^*)C\|/\|C\|$", "log", _series(rows, "eps_proj", lx, floor=1e-16)),
-            Panel(f"Lx={lx}: TT-rounding tail", r"vertical bond $\eta_Q$",
-                  r"$\tau_{round}$", "log", _series(rows, "tau_round", lx, floor=1e-16)),
-            Panel(f"Lx={lx}: arrow isometry (sanity)", r"vertical bond $\eta_Q$",
-                  r"$\max_i\|q_i^*q_i-I\|$", "log", _series(rows, "delta_local", lx, floor=1e-17)),
-            Panel(f"Lx={lx}: residual R-bond", r"vertical bond $\eta_Q$",
-                  "final bond", "linear", _series(rows, "final_bond", lx)),
-        ])
-    write_panel_grid(fig_path, grid, row_titles=[f"Lx={lx}" for lx in args.lxs],
-                     col_titles=["range capture eps_proj", "TT-rounding tail",
-                                 "arrow isometry (sanity)", "residual R-bond"],
-                     cell_width=370, cell_height=290)
+    """Two clean 2-panel figures at a fixed Lx (the largest swept); series = states.
+
+    MAIN (``fig_path``): the feasibility claim -- range capture ``eps_proj`` and the
+    TT-rounding tail ``tau_round`` vs the vertical-bond cap ``eta_q``. SECONDARY
+    (``-sanity``): the arrow-isometry defect (should hug ~1e-15, well under the
+    1e-12 threshold) and the carried residual R-bond. The Lx facet is collapsed to
+    ``max(args.lxs)`` so the headline reads as one question per panel.
+    """
+    lx = max(args.lxs)
+
+    main = [
+        Panel(f"Range capture after structured QR (Lx={lx})", r"vertical bond $\eta_Q$",
+              r"$\|(I-QQ^*)C\|_F/\|C\|_F$", "log", _series(rows, "eps_proj", lx, floor=1e-16)),
+        Panel("TT-rounding tail", r"vertical bond $\eta_Q$",
+              r"$\tau_{\mathrm{round}}$", "log", _series(rows, "tau_round", lx, floor=1e-16)),
+    ]
+    write_line_panels(fig_path, main, width=980, height=320)
+
+    sec_path = str(Path(fig_path).with_name(Path(fig_path).stem + "-sanity" + ".pdf"))
+    sanity = [
+        Panel("Arrow isometry defect", r"vertical bond $\eta_Q$",
+              r"$\max_i\|q_i^*q_i-I\|$", "log", _series(rows, "delta_local", lx, floor=1e-17),
+              hlines=[1e-12]),
+        Panel("Residual bond", r"vertical bond $\eta_Q$",
+              "final R-bond", "linear", _series(rows, "final_bond", lx)),
+    ]
+    write_line_panels(sec_path, sanity, width=980, height=320)
 
 
 def parse_args():

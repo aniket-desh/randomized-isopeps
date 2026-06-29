@@ -29,8 +29,6 @@ from __future__ import annotations
 import argparse
 
 import numpy as np
-from matplotlib import colormaps
-from matplotlib.colors import to_hex
 
 from rand_isopeps.aggregate import median_band
 from rand_isopeps.column.from_quimb import find_center_column, from_quimb_column
@@ -38,20 +36,16 @@ from rand_isopeps.column.global_range import global_column_range, reference_svd
 from rand_isopeps.column.local_moses import local_column_qr
 from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
 from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
-from rand_isopeps.plotting import Panel, Series, write_panel_grid
+from rand_isopeps.plotting import (
+    METHOD_ORDER,
+    Panel,
+    Series,
+    method_style,
+    state_style,
+    write_panel_grid,
+)
 
 SUITE = "column_sketch"
-
-# method key -> (label, color, marker, linestyle)
-METHODS = {
-    "local_det": ("local Moses (det)", "#0072b2", "o", "-"),
-    "local_rand": ("local Moses (rand)", "#56b4e9", "s", "-"),
-    "global_kron": ("global Kron (χ=1)", "#d55e00", "X", ":"),
-    "global_rmps": ("global rMPS χ=8", "#009e73", "D", "-"),
-    "global_gauss": ("global Gaussian", "#222222", "o", "--"),
-    "eckart_young": ("Eckart-Young floor", "#999999", "o", ":"),
-}
-METHOD_ORDER = list(METHODS)
 
 
 def _prepare_state(args, kind, lx, seed):
@@ -120,12 +114,22 @@ def run(args):
     return csv_path, fig_path
 
 
-def _series(rows, value_key, floor=0.0):
-    present = [m for m in METHOD_ORDER if any(r["method"] == m for r in rows)]
-    bands = median_band(rows, group_key="method", x_key="k", value_key=value_key, group_order=present)
+# PLOT.md section 1: Kron does not belong in the physical-accuracy plot (it lives
+# in the rMPS probe-quality figure), so it is dropped from both panels here. The
+# excess panel also omits the Eckart-Young floor, which is zero by definition.
+_ERROR_METHODS = ["eckart_young", "global_gauss", "global_rmps", "local_det", "local_rand"]
+_EXCESS_METHODS = ["global_gauss", "global_rmps", "local_det", "local_rand"]
+
+
+def _series(rows, value_key, methods, floor=1e-16):
+    """Median + IQR bands over seeds for ``methods`` (canonical METHOD_ORDER),
+    styled through ``method_style`` so the grammar lives in the plotting module.
+    Values are floored at ``floor`` so nothing hits zero on the log axis."""
+    order = [m for m in METHOD_ORDER if m in methods]
+    bands = median_band(rows, group_key="method", x_key="k", value_key=value_key, group_order=order)
     out = []
     for key, (xs, med, lo, hi) in bands.items():
-        label, color, marker, ls = METHODS[key]
+        label, color, marker, ls = method_style(key)
         out.append(Series(label=label, x=[float(v) for v in xs], y=[max(m, floor) for m in med],
                           ylow=[max(v, floor) for v in lo], yhigh=[max(v, floor) for v in hi],
                           color=color, marker=marker, linestyle=ls))
@@ -133,21 +137,25 @@ def _series(rows, value_key, floor=0.0):
 
 
 def make_plot(rows, fig_path, args):
-    """Rows = state; cols = column error vs k, excess over Eckart-Young vs k."""
+    """One faceted grid: rows = states, cols = (column error, excess over EY) vs k.
+
+    Col A is the relative column error with the Eckart-Young floor (dotted gray, no
+    marker); col B is the excess over that optimum. Both log-y; bands are the 25-75
+    IQR over seeds. Kron is dropped (probe-figure material); the EY floor is omitted
+    from the excess panel since it is zero by definition.
+    """
     grid = []
     for state in args.states:
         sub = [r for r in rows if r["state"] == state]
-        label = "random" if state == "random" else state.replace("tfim@", "TFIM g=")
         grid.append([
-            Panel(f"{label}: column error", "rank k", r"$\|C-\hat C\|_F/\|C\|_F$", "log",
-                  _series(sub, "rel_error", floor=1e-16)),
-            Panel(f"{label}: excess over Eckart-Young", "rank k", "excess (method − optimal)", "log",
-                  [s for s in _series(sub, "excess_error", floor=1e-16) if s.label != "Eckart-Young floor"]),
+            Panel("Column error", r"rank $k$", r"$\|C-\hat C\|_F/\|C\|_F$", "log",
+                  _series(sub, "rel_error", _ERROR_METHODS)),
+            Panel("Excess over Eckart-Young", r"rank $k$", "excess (method - optimal)", "log",
+                  _series(sub, "excess_error", _EXCESS_METHODS)),
         ])
     write_panel_grid(fig_path, grid,
-                     row_titles=["random" if s == "random" else s.replace("tfim@", "TFIM g=")
-                                 for s in args.states],
-                     col_titles=["column error vs k (+ EY floor)", "excess over Eckart-Young"],
+                     row_titles=[state_style(s)[0] for s in args.states],
+                     col_titles=["Column error", "Excess over Eckart-Young"],
                      cell_width=440, cell_height=300)
 
 
