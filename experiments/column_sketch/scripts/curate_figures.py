@@ -62,7 +62,18 @@ def main() -> None:
     a2 = argparse.Namespace(lxs=_lxs(rows2))
     exp02.make_plot(rows2, os.path.join(DEST, "exp02-global-vs-local.png"), a2)
 
-    for name in ("exp01-injection.png", "exp01-materialized-detail.png", "exp02-global-vs-local.png"):
+    names = ["exp01-injection.png", "exp01-materialized-detail.png", "exp02-global-vs-local.png"]
+    try:  # exp04 needs quimb to have produced a CSV; skip cleanly if it never ran
+        exp04 = _load("exp04_real_column_spectrum.py")
+        rows4 = [r for r in _latest("exp4-real-spectrum") if r.get("col_spectrum")]
+        states = sorted({r["state"] for r in rows4}, key=lambda s: (s != "random", s))
+        a4 = argparse.Namespace(states=states, eta=4)
+        exp04.make_plot(rows4, os.path.join(DEST, "exp04-real-column-spectrum.png"), a4)
+        names.append("exp04-real-column-spectrum.png")
+    except SystemExit:
+        print("  (skipping exp04 figure -- no exp4 CSV found)")
+
+    for name in names:
         print(f"  wrote reports/figures/column_sketch/{name}")
 
 

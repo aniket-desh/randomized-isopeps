@@ -69,6 +69,38 @@ needs the full matrix-free algorithm including absorption).
 [Per-`Lx` detail](figures/column_sketch/exp01-materialized-detail.png): column error,
 excess over rank-`r`, OSI vs `χ`, and the isometry defect (≈1e-14 everywhere).
 
+## Result 3 (Stage 0) — real isoPEPS columns: structured vs random
+
+The synthetic study used a worst-case caveat: *random* columns are nearly full-rank, so the
+global sketch can't help there — but a *physical* (area-law) column might be low-rank, which is
+the whole bet. Stage 0 tests it on **real quimb isoTNS states**. `column/from_quimb.py` extracts
+the genuine whole-column map `C_j` that the block Moses move factors (validated below), for a
+2D **transverse-field Ising ground state** (imaginary-time TEBD2, the rMPS paper's model, now in
+2D) vs a **random isoTNS** — same bond budget (χ=8, η=4).
+
+![Real isoTNS column spectrum: TFIM (structured) vs random](figures/column_sketch/exp04-real-column-spectrum.png)
+
+The orthogonality-center column's singular spectrum **decays sharply for the physical state and is
+near-flat for random** (left). The effective rank (energy to 99%) is **~2 for TFIM vs ~14–25 for
+random**, and — the two checks I was most worried about — the gap **survives criticality** (g=3.04
+≈ g=3.5) and **widens with `Lx`** (random saturates the `d^Lx` codomain cap; TFIM stays ~constant,
+area-law). Truncation to η=4 is **lossless for TFIM (~1.0) but increasingly lossy for random
+(0.93→0.64)**. A gauge-free cross-check on the matrix the move *actually* truncates (svd2) reproduces
+the gap (random ~18, TFIM ~2–4).
+
+**This is the green-light:** physical columns have the low-effective-rank structure the global sketch
+needs, exactly where random ones don't. **Validated** by two adversarial verifiers running live probes:
+the deferred **gate 3** confirmed `range(orth(C_j))` equals the lossless move's new isometric column to
+`4e-16` (it is the genuine object); the η-budget is fair (force-matching random's vertical bonds leaves
+its rank unchanged); and g=3.04 is converged to 0.087% of exact ED with rank still 2 at doubled η.
+
+**Caveats carried forward (from the adversarial pass):** "rank ~2" is **spectral decay / low effective
+rank**, not mathematical rank (the matrix is full-rank; its *spectrum* collapses). It is the **boundary
+orthogonality-center column** (codomain = physical); interior columns differ. `random_isotns` is the
+**maximal-hardness** reference (it brackets the endpoints; intermediate physically-hard states — e.g.
+time-evolved — are untested). The `Lx`-growth is "random saturates the `d^Lx` cap" over 3 points, not a
+fitted volume law. These refine the framing; none overturns the green-light.
+
 ## Honest assessment — what we have and have not shown
 
 **Solidly established.** (1) The machinery is *correct*: rMPS isotropy holds, `χ_sk=1`
