@@ -101,6 +101,47 @@ orthogonality-center column** (codomain = physical); interior columns differ. `r
 time-evolved — are untested). The `Lx`-growth is "random saturates the `d^Lx` cap" over 3 points, not a
 fitted volume law. These refine the framing; none overturns the green-light.
 
+## Result 4 (Stage 1) — global vs local on real columns: accuracy ties, the win is cost
+
+A theory review reframed the thesis. We are **not** sketching to enforce the isoPEPS isometry or
+to be more accurate than Moses. We sketch to make the otherwise-intractable *whole-column* QR
+tractable; an **arrow-compatible TT-SVD sweep** on the sampled range then turns it into a genuinely
+isometric isoPEPS column (each core `q_i*q_i=I` — the arrows). The honest thesis:
+
+> *a global range finder gives the **same** physical accuracy as the Moses move at **lower
+> algorithmic cost**, provided the sampled range rounds to a **low-bond isometric column**.*
+
+**Accuracy ties (exp05).** On the real extracted column `C_j`, at matched output rank, global
+(oversampled) sits exactly at Eckart–Young while the greedy local Moses sweep carries a small excess
+(~10⁻³–10⁻⁵ for TFIM) — both near-optimal, total error dominated by the shared EY floor.
+
+![Real-column accuracy: global (oversampled) at EY, local near-optimal](figures/column_sketch/exp05-real-global-vs-local.png)
+
+The key correction: our synthetic Result 2 ("global beats local 2.6–4×") was an **artifact of
+non-canonical synthetic columns**. Real isoTNS columns are MPS-*canonical* (low local-TN-rank), so
+the local sweep is already near-optimal and there is no flat-rank-vs-TN-rank gap for global to
+exploit. **Accuracy is not the deciding axis.**
+
+**Feasibility holds (exp06).** The structured QR (`column/structured_qr.py`) rounds the *physical*
+column's sampled range into a **low-bond isometric column at the EY floor** — `eps_proj ≈ 5%` at
+vertical bond 4, `≈1%` at 8 — with the **arrows preserved to 3e-15** at every bond. A random column
+does not round cheaply (45–90%). So the "low-bond isometric" clause of the thesis is satisfied for
+physical columns.
+
+![Feasibility gate: physical range rounds to a low-bond isometric column; arrows preserved](figures/column_sketch/exp06-structured-qr-feasibility.png)
+
+**The cost case (first read).** The variational **disentangler is 86% of the local move's SVD work**
+(12 of 19 SVDs per column; the Ndis-iteration alternating minimization at each site). The global
+sketch **eliminates it** — ~ℓ matrix–MPS products + Lx TT-QR SVDs, no disentangler — and still gets a
+small carried `R`-bond *for free* because the physical column's flat rank is low (Stage 0). A full
+implementation-free FLOP tally of *both* sides (and the R-column absorption) is the natural next
+experiment, but the structural case is clear: global trades the move's dominant cost (the
+disentangler) for a cheap one-shot range capture.
+
+**Stage-1 verdict:** accuracy ≈ tie (both near-optimal); the structured QR produces valid low-bond
+isometric columns; the disentangler — 86% of the local SVD work — is what the global move stands to
+remove. The project is now squarely a **cost** story, and its feasibility clause holds.
+
 ## Honest assessment — what we have and have not shown
 
 **Solidly established.** (1) The machinery is *correct*: rMPS isotropy holds, `χ_sk=1`

@@ -63,15 +63,24 @@ def main() -> None:
     exp02.make_plot(rows2, os.path.join(DEST, "exp02-global-vs-local.png"), a2)
 
     names = ["exp01-injection.png", "exp01-materialized-detail.png", "exp02-global-vs-local.png"]
-    try:  # exp04 needs quimb to have produced a CSV; skip cleanly if it never ran
-        exp04 = _load("exp04_real_column_spectrum.py")
-        rows4 = [r for r in _latest("exp4-real-spectrum") if r.get("col_spectrum")]
-        states = sorted({r["state"] for r in rows4}, key=lambda s: (s != "random", s))
-        a4 = argparse.Namespace(states=states, eta=4)
-        exp04.make_plot(rows4, os.path.join(DEST, "exp04-real-column-spectrum.png"), a4)
-        names.append("exp04-real-column-spectrum.png")
-    except SystemExit:
-        print("  (skipping exp04 figure -- no exp4 CSV found)")
+    def _state_order(rs):
+        return sorted({r["state"] for r in rs}, key=lambda s: (s != "random", s))
+
+    for mod, prefix, png, build_args in (
+        ("exp04_real_column_spectrum.py", "exp4-real-spectrum", "exp04-real-column-spectrum.png",
+         lambda rs: argparse.Namespace(states=_state_order(rs), eta=4)),
+        ("exp05_real_global_vs_local.py", "exp5-real-gvl", "exp05-real-global-vs-local.png",
+         lambda rs: argparse.Namespace(states=_state_order(rs))),
+        ("exp06_structured_qr_feasibility.py", "exp6-structured-feasibility", "exp06-structured-qr-feasibility.png",
+         lambda rs: argparse.Namespace(lxs=_lxs(rs), states=_state_order(rs))),
+    ):
+        try:  # each needs quimb to have produced a CSV; skip cleanly if it never ran
+            m = _load(mod)
+            rs = [r for r in _latest(prefix) if any(r.values())]
+            m.make_plot(rs, os.path.join(DEST, png), build_args(rs))
+            names.append(png)
+        except SystemExit:
+            print(f"  (skipping {png} -- no {prefix} CSV found)")
 
     for name in names:
         print(f"  wrote reports/figures/column_sketch/{name}")

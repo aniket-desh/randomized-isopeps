@@ -114,6 +114,35 @@ def test_controlled_spectrum_decays():
     assert s[0] / s[-1] > 10.0          # a genuine decay
 
 
+def test_structured_qr_cores_are_isometric():
+    # the reframe: the structured TT-QR sweep must produce LOCALLY isometric cores (the arrows),
+    # to machine precision, at every vertical-bond cap -- truncation changes the subspace, not the
+    # isometry.
+    from rand_isopeps.column.structured_qr import structured_column_qr
+    op = random_column_operator(5, 2, 3, 6, np.random.default_rng(0), ensemble="decay")
+    for eta_q in (1, 2, 4, 100):
+        res = structured_column_qr(op, ell=8, eta_q=eta_q, chi_sk=8, sketch_kind="rmps",
+                                   rng=np.random.default_rng(1))
+        assert res.delta_local < 1e-10
+        assert res.delta_global < 1e-10
+        assert res.final_bond <= 8
+        assert 0.0 <= res.eps_proj <= 1.0 + 1e-9
+
+
+def test_structured_qr_matches_dense_range_at_full_bond():
+    # with no vertical-bond truncation the structured QR captures the SAME range as the dense
+    # orth(C*Omega) projector (it is just a canonicalization of that range).
+    from rand_isopeps.column.structured_qr import structured_column_qr
+    op = random_column_operator(5, 2, 3, 6, np.random.default_rng(2), ensemble="decay")
+    c = op.materialize()
+    ref = reference_svd(c)
+    dense = global_column_range(c, op.input_dims, ell=8, chi_sk=8, sketch_kind="rmps",
+                                target_rank=8, rng=np.random.default_rng(3), ref_svd=ref)
+    struct = structured_column_qr(op, ell=8, eta_q=10**6, chi_sk=8, sketch_kind="rmps",
+                                  rng=np.random.default_rng(3))
+    assert abs(struct.eps_proj - dense.rel_error) < 1e-9
+
+
 def test_sampled_bond_growth_equals_d_times_chi():
     c = random_column_operator(6, 2, 3, 5, np.random.default_rng(8), ensemble="gaussian")
     for chi in (1, 2, 4):
