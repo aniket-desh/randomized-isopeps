@@ -33,7 +33,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from rand_isopeps.column.operator import ColumnOperator
+from rand_isopeps.column.operator import (
+    ColumnOperator,
+    dense_column_nbytes,
+    mpo_frobenius_norm,
+)
+from rand_isopeps.compression.mpo_mps_absorb import mps_norm_sq, mps_to_vector
+from rand_isopeps.linalg.rmps_sketch import rmps_cores
 
 
 def _bond(psi, a_tag, b_tag):
@@ -100,11 +106,34 @@ def from_quimb_column(psi, j, split="right", normalize=True):
 
     op = ColumnOperator(cores)
     if normalize:
-        nrm = float(np.linalg.norm(op.materialize()))
+        # ``||C||_F`` via transfer-matrix contraction -- never materialize the
+        # ``(d*chi)^Lx`` column just to take a norm (a hidden large-Lx blow-up).
+        nrm = mpo_frobenius_norm(cores)
         if nrm > 0:
             cores[0] = cores[0] / nrm
             op = ColumnOperator(cores)
     return op
+
+
+def _isometry_defect_mf(op, *, n_probes=8, chi_score=4, seed=0):
+    """Matrix-free isometry defect ``median_omega |||C omega||^2 / ||omega||^2 - 1|``.
+
+    For an exact isometry ``C^*C = I`` so the ratio is ``1`` for *every* probe and the
+    defect is ``0`` to roundoff; the entangled centre column has ``C^*C != I`` so the
+    ratio departs from 1. Uses isotropic rMPS probes over the input legs: ``||omega||^2``
+    via the transfer-matrix MPS norm and ``||C omega||^2`` from the small ``n_out``-length
+    output vector -- the ``prod(r_i)`` dense vector is never formed."""
+    rng = np.random.default_rng(seed)
+    complex_valued = np.iscomplexobj(op.cores[0])
+    ratios = []
+    for _ in range(n_probes):
+        w = rmps_cores(op.input_dims, chi_score, rng, complex_valued=complex_valued)
+        wn = mps_norm_sq(w)
+        if wn <= 0:
+            continue
+        cw = mps_to_vector(op.matvec_mps(w))
+        ratios.append(abs(float(np.vdot(cw, cw).real) / wn - 1.0))
+    return float(np.median(ratios)) if ratios else 0.0
 
 
 def find_center_column(psi, tol=1e-04):
@@ -118,20 +147,34 @@ def find_center_column(psi, tol=1e-04):
     carries entanglement (a spread spectrum). This returns the boundary whose column
     map is non-isometric.
 
+    Small ``Lx`` (dense column within budget): the exact SVD spread, as before.
+    Large ``Lx`` (dense column over budget): a matrix-free isometry-defect estimate
+    (:func:`_isometry_defect_mf`) so center-finding never materializes the
+    ``(d*chi)^Lx`` column -- the regime that OOM-crashed the host.
+
     Scope: this handles centres left at a boundary, which is every state these code
     paths produce. If BOTH boundaries are isometric the centre is *interior* (e.g.
     from some other gauge), and we **raise** rather than silently extract a flat
     isometric column -- the failure mode an adversarial check flagged. (Generalising
     to interior centres needs a full per-column scan and is deliberately out of scope.)
     """
-    spreads = {}
+    from rand_isopeps.column.operator import DEFAULT_DENSE_MAX_GB
+
+    scores = {}
     for j, split in ((0, "right"), (psi.Ly - 1, "left")):
         op = from_quimb_column(psi, j, split=split, normalize=False)
-        s = np.linalg.svd(op.materialize(), compute_uv=False)
-        s = s[s > 0]
-        spreads[(j, split)] = float(1.0 - s[-1] / s[0]) if s.size else 0.0
-    (jc, split), spread = max(spreads.items(), key=lambda kv: kv[1])
-    if spread < tol:
+        # exact spread when the column is cheap to materialize; matrix-free defect
+        # (a different scale, but 0 for an isometry and >0 for the centre, same as
+        # the spread) once the dense column would blow the memory budget.
+        peak = 3.0 * dense_column_nbytes(op.n_out, op.n_in)
+        if peak <= DEFAULT_DENSE_MAX_GB * (1024 ** 3):
+            s = np.linalg.svd(op.materialize(), compute_uv=False)
+            s = s[s > 0]
+            scores[(j, split)] = float(1.0 - s[-1] / s[0]) if s.size else 0.0
+        else:
+            scores[(j, split)] = _isometry_defect_mf(op, seed=hash((j, split)) & 0xFFFF)
+    (jc, split), score = max(scores.items(), key=lambda kv: kv[1])
+    if score < tol:
         raise ValueError(
             "no boundary column is the orthogonality centre (both are ~isometric); the "
             "centre is likely interior -- canonicalize it to a boundary first, or extend "

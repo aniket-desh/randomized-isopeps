@@ -95,6 +95,33 @@ def apply_mpo_to_mps(mpo: list[np.ndarray], mps: list[np.ndarray]) -> list[np.nd
     return product
 
 
+def apply_mpo_adjoint_to_mps(mpo: list[np.ndarray], mps: list[np.ndarray]) -> list[np.ndarray]:
+    """Apply the adjoint operator ``C^*`` (an MPO) to an MPS, matrix-free.
+
+    ``C`` maps the input (absorbed) legs ``din`` to the output (retained) legs
+    ``dout``; its adjoint ``C^*`` maps ``dout -> din``. As an MPO that is each core
+    conjugated with the two physical legs swapped, ``(ml, dout, din, mr) ->
+    (ml, din, dout, mr)``, with the bond structure unchanged. So ``mps`` here is an
+    MPS over the *output* legs (``dout``) and the result is an MPS over the *input*
+    legs (``din``) -- the access-model form of ``C^* y`` with no ``prod(din)``
+    dense vector ever formed.
+    """
+    adjoint = [np.conj(w).transpose(0, 2, 1, 3) for w in mpo]
+    return apply_mpo_to_mps(adjoint, mps)
+
+
+def mps_norm_sq(mps: list[np.ndarray]) -> float:
+    """``<psi|psi>`` of an MPS by the left-to-right transfer-matrix contraction.
+
+    Cost ``O(L * d * bond^3)`` and, crucially, never forms the ``prod(d_i)`` dense
+    vector -- the matrix-free norm used to score/normalize probes over the large
+    input leg space."""
+    env = np.ones((1, 1), dtype=np.result_type(*[s.dtype for s in mps]))
+    for a in mps:  # a: (dl, d, dr)
+        env = np.einsum("ab,aic,bid->cd", env, a.conj(), a, optimize=True)
+    return float(np.abs(env[0, 0]))
+
+
 def max_mps_bond(mps: list[np.ndarray]) -> int:
     return max(max(site.shape[0], site.shape[2]) for site in mps)
 

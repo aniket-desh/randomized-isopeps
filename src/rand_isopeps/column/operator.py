@@ -39,14 +39,68 @@ same range finder and experiments:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import numpy as np
 
-from rand_isopeps.compression.mpo_mps_absorb import apply_mpo_to_mps, max_mps_bond, mps_to_vector
+from rand_isopeps.compression.mpo_mps_absorb import (
+    apply_mpo_adjoint_to_mps,
+    apply_mpo_to_mps,
+    max_mps_bond,
+    mps_to_vector,
+)
 from rand_isopeps.synthetic.tensors import make_controlled_spectrum_matrix, random_complex
 
 ColumnEnsemble = "gaussian | decay | identity_plus_noise"
+
+# A dense column has ``N_out * N_in = (d*chi)^Lx`` complex entries -- it grows ~16x
+# per +1 in Lx and reaches tens of GB by Lx~8 (see reports/incidents/2026-06-29).
+# ``materialize`` and the dense-reference validation paths assert against this budget
+# so the large-Lx regime fails with a clear error pointing at the matrix-free path
+# instead of OOM-killing the machine. Override with RAND_ISOPEPS_DENSE_MAX_GB.
+DEFAULT_DENSE_MAX_GB = float(os.environ.get("RAND_ISOPEPS_DENSE_MAX_GB", "2.0"))
+# ``materialize`` builds an intermediate of the same order, then a transpose copy and
+# downstream products (``C @ Omega``, ``Q^* C``) all of order N_out*N_in -- so the live
+# peak is a few times the raw matrix. Charge that so the guard trips before the OOM.
+_DENSE_PEAK_COPIES = 3.0
+
+
+def dense_column_nbytes(n_out: int, n_in: int, itemsize: int = 16) -> int:
+    """Bytes of the dense ``(n_out, n_in)`` column (``complex128`` -> 16 B/entry)."""
+    return int(n_out) * int(n_in) * int(itemsize)
+
+
+def assert_dense_safe(n_out: int, n_in: int, *, max_gb: float | None = None,
+                      context: str = "dense column", itemsize: int = 16) -> None:
+    """Raise ``MemoryError`` before allocating a dense column above the budget.
+
+    The peak working set is ``~_DENSE_PEAK_COPIES`` times the raw matrix (the
+    materialize intermediate + a transpose copy + dense ``C@Omega`` / ``Q^*C``
+    products). This is the dense *validation* guard: at large ``Lx`` use the
+    matrix-free path (``matvec_mps`` / the matrix-free structured QR) instead."""
+    budget = DEFAULT_DENSE_MAX_GB if max_gb is None else max_gb
+    raw = dense_column_nbytes(n_out, n_in, itemsize)
+    peak = _DENSE_PEAK_COPIES * raw
+    if peak > budget * (1024 ** 3):
+        raise MemoryError(
+            f"{context} {n_out} x {n_in} would need ~{peak / 1024 ** 3:.2f} GiB peak "
+            f"(raw {raw / 1024 ** 3:.2f} GiB) > {budget:.2f} GiB budget. This is a dense "
+            "validation path; use the matrix-free column QR/scoring (matvec_mps). Raise "
+            "RAND_ISOPEPS_DENSE_MAX_GB only if you truly have the RAM."
+        )
+
+
+def mpo_frobenius_norm(cores: list[np.ndarray]) -> float:
+    """``||C||_F`` of a column MPO by transfer-matrix contraction -- no dense column.
+
+    Contracts each core ``(ml, dout, din, mr)`` with its conjugate over both physical
+    legs, carrying the doubled bond environment. Replaces ``norm(materialize())`` so a
+    column can be normalized without forming the ``(d*chi)^Lx`` matrix."""
+    env = np.ones((1, 1), dtype=np.result_type(*[c.dtype for c in cores]))
+    for a in cores:  # a: (ml, dout, din, mr)
+        env = np.einsum("ab,aijc,bijd->cd", env, a.conj(), a, optimize=True)
+    return float(np.sqrt(max(np.abs(env[0, 0]), 0.0)))
 
 
 def _as_tuple(value: int | tuple[int, ...], lx: int) -> tuple[int, ...]:
@@ -115,7 +169,11 @@ class ColumnOperator:
         The ordering matches :func:`rand_isopeps.linalg.rmps_sketch.rmps_to_vector`
         (row-major over sites) so a dense ``materialize() @ Omega`` agrees with the
         matrix-free :meth:`matvec` to floating-point roundoff.
+
+        Guarded against the ``(d*chi)^Lx`` blow-up: raises ``MemoryError`` above the
+        dense budget (see :func:`assert_dense_safe`) instead of OOM-killing the host.
         """
+        assert_dense_safe(self.n_out, self.n_in, context="ColumnOperator.materialize")
         work = self.cores[0][0]  # drop left boundary bond -> (dout0, din0, mr0)
         for core in self.cores[1:]:
             work = np.tensordot(work, core, axes=(-1, 0))  # (..., dout_i, din_i, mr_i)
@@ -135,6 +193,19 @@ class ColumnOperator:
         ``prod(o_i)``-length dense vector is ever formed.
         """
         return apply_mpo_to_mps(self.cores, omega_cores)
+
+    def rmatvec_mps(self, y_cores: list[np.ndarray]) -> list[np.ndarray]:
+        """Matrix-free adjoint ``C_j^* y`` as an MPS (the access-model transpose).
+
+        ``y_cores`` is an MPS over the *retained* (output) legs ``o_i``; the result
+        is an MPS over the *absorbed* (input) legs ``r_i`` with bond ``<= mpo_bond *
+        y_bond``. This is the ``C^* y`` step of a matrix-free power iteration -- the
+        ``prod(r_i)``-length dense vector is never formed."""
+        return apply_mpo_adjoint_to_mps(self.cores, y_cores)
+
+    def frobenius_norm(self) -> float:
+        """``||C_j||_F`` via transfer-matrix contraction -- no dense materialize."""
+        return mpo_frobenius_norm(self.cores)
 
     def matvec(self, omega_cores: list[np.ndarray]) -> np.ndarray:
         """Dense ``C_j omega`` via the matrix-free path then a final contraction.

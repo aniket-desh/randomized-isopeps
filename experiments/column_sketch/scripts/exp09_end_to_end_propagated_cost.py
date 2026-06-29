@@ -68,10 +68,15 @@ from pathlib import Path
 import numpy as np
 
 from rand_isopeps.column.from_quimb import find_center_column, from_quimb_column
-from rand_isopeps.column.structured_qr import structured_column_qr
+from rand_isopeps.column.operator import DEFAULT_DENSE_MAX_GB, dense_column_nbytes
+from rand_isopeps.column.structured_qr import make_column_qr
 from rand_isopeps.experiment_utils.cost_model import svd_flops
-from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
-from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
+from rand_isopeps.io_utils import IncrementalCsvWriter, output_paths, timestamp_slug
+from rand_isopeps.parallel import (
+    auto_worker_count,
+    run_parallel_stream,
+    with_blas_threads,
+)
 from rand_isopeps.plotting import Panel, Series, state_style, write_line_panels
 
 SUITE = "column_sketch"
@@ -155,13 +160,14 @@ def _candidate_ells(eta_q, n_in):
     return sorted({c for c in (eta_q - 2, eta_q, eta_q + 2, eta_q + 4) if 1 <= c <= n_in})
 
 
-def _match_global(op, c, target_eps, args):
+def _match_global(op, qr_fn, target_eps, args):
     """Cheapest global config (ell,q,chi_sk,eta_q) with eps_proj <= target. Returns dict or best-eps.
 
     Global searches a BROAD vertical-bond set (independent of the prep bond) so it can match a loose
     target cheaply (small eta_q) or a strict one (large eta_q) -- it is not handicapped to a fixed bond.
+    ``qr_fn`` is the budget-aware QR closure (dense reference at small Lx, matrix-free above).
     """
-    n_in, n_out = c.shape[1], c.shape[0]
+    n_in, n_out = op.n_in, op.n_out
     eta_qs = sorted({e for e in (2, 3, 4, 6, 8) if 1 <= e <= n_out})
     best, best_overall = None, None
     for eta_q in eta_qs:
@@ -170,8 +176,7 @@ def _match_global(op, c, target_eps, args):
                 for q in args.n_powers:
                     rng = np.random.default_rng(args.seed + 101 * ell + 1009 * q
                                                 + 10007 * chi_sk + 100003 * eta_q)
-                    res = structured_column_qr(op, ell=ell, eta_q=eta_q, chi_sk=chi_sk,
-                                               sketch_kind="rmps", n_power=q, rng=rng, reference=c)
+                    res = qr_fn(ell, eta_q, chi_sk, q, rng)
                     cand = {"ell": ell, "q": q, "chi_sk": chi_sk, "eta_q": eta_q,
                             "eps": res.eps_proj, "final_bond": res.final_bond, "r_bond": res.r_bond}
                     if best_overall is None or res.eps_proj < best_overall["eps"]:
@@ -196,14 +201,16 @@ def _run_trial(task):
             psi = _prepare_state(args, kind, lx, seed, eta)
             jc, split = find_center_column(psi)
             op = from_quimb_column(psi, jc, split=split)
-            c = op.materialize()
-            n_out = c.shape[0]
+            # budget-aware QR (dense reference small-Lx, matrix-free above) -- no
+            # (d*chi)^Lx materialize, so interior/large-Lx columns no longer OOM.
+            qr_fn, _ = make_column_qr(op)
+            n_out = op.n_out
             din_boundary, dout_boundary = op.input_dims, op.output_dims
 
             local_flops, local_eps, sweep_max_eps, n_moves = _real_local_sweep(psi, jc, split, eta, args)
             if n_moves == 0 or not (local_eps == local_eps):   # skip nan boundary error
                 continue
-            cfg, matched = _match_global(op, c, local_eps * (1.0 + args.match_tol), args)
+            cfg, matched = _match_global(op, qr_fn, local_eps * (1.0 + args.match_tol), args)
             eta_q, ell, q, chi_sk = cfg["eta_q"], cfg["ell"], cfg["q"], cfg["chi_sk"]
 
             # boundary column (1) + interior columns (n_moves-1), parametric steady state
@@ -236,14 +243,27 @@ def _run_trial(task):
         return rows
 
 
+def _est_task_bytes(args):
+    """Conservative dense-column peak at the largest Lx, capped at the dense budget
+    (above-budget trials run matrix-free, so the real per-worker peak is bounded)."""
+    maxlx = max(args.lxs)
+    dense_peak = 3.0 * dense_column_nbytes(args.phys ** maxlx, args.chi ** maxlx)
+    return int(min(dense_peak, 3.0 * DEFAULT_DENSE_MAX_GB * (1024 ** 3)))
+
+
 def run(args):
-    workers = auto_worker_count(args.workers)
+    workers = auto_worker_count(args.workers, est_bytes_per_task=_est_task_bytes(args))
     tasks = [(args, kind, lx, seed)
              for kind in args.states for lx in args.lxs for seed in range(args.seeds)]
-    rows = flatten(run_parallel(_run_trial, tasks, workers))
     stamp = timestamp_slug()
     csv_path, fig_path = output_paths(SUITE, f"exp9-propagated-cost-{stamp}")
-    write_csv(csv_path, rows)
+
+    # incremental write: a crash mid-sweep keeps every completed trial on disk
+    rows = []
+    with IncrementalCsvWriter(csv_path) as writer:
+        for batch in run_parallel_stream(_run_trial, tasks, workers):
+            writer.write(batch)
+            rows.extend(batch)
     make_plot(rows, fig_path, args)
     return csv_path, fig_path
 

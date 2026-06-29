@@ -41,10 +41,15 @@ import argparse
 import numpy as np
 
 from rand_isopeps.column.from_quimb import find_center_column, from_quimb_column
-from rand_isopeps.column.structured_qr import structured_column_qr
+from rand_isopeps.column.operator import DEFAULT_DENSE_MAX_GB, dense_column_nbytes
+from rand_isopeps.column.structured_qr import make_column_qr
 from rand_isopeps.experiment_utils.cost_model import svd_flops
-from rand_isopeps.io_utils import output_paths, timestamp_slug, write_csv
-from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
+from rand_isopeps.io_utils import IncrementalCsvWriter, output_paths, timestamp_slug
+from rand_isopeps.parallel import (
+    auto_worker_count,
+    run_parallel_stream,
+    with_blas_threads,
+)
 from rand_isopeps.plotting import Panel, Series, state_style, write_line_panels
 
 SUITE = "column_sketch"
@@ -141,8 +146,11 @@ def _run_trial(task):
         local_flops, local_eps, _ = _local_cost_and_acc(psi, jc, split, args)
 
         op = from_quimb_column(psi, jc, split=split)
-        c = op.materialize()
-        n_in, n_out = c.shape[1], c.shape[0]
+        # Budget-aware QR: dense reference (exact eps_proj) at small Lx, matrix-free
+        # (estimated eps_proj, no (d*chi)^Lx allocation) once the column blows the
+        # memory budget -- so large-Lx runs no longer materialize and OOM.
+        qr_fn, _ = make_column_qr(op)
+        n_in, n_out = op.n_in, op.n_out
         # local is only a meaningful accuracy target when the move itself succeeded; on an
         # incompressible random column local_eps ~ O(1) and "matching" it is vacuous.
         local_useful = local_eps < args.useful_eps
@@ -160,8 +168,7 @@ def _run_trial(task):
                     for q in args.n_powers:
                         rng = np.random.default_rng(args.seed + 7 * seed + 13 * lx + 101 * ell
                                                     + 1009 * q + 10007 * chi_sk + 100003 * eta_q)
-                        res = structured_column_qr(op, ell=ell, eta_q=eta_q, chi_sk=chi_sk,
-                                                   sketch_kind="rmps", n_power=q, rng=rng, reference=c)
+                        res = qr_fn(ell, eta_q, chi_sk, q, rng)
                         gflops, sk, tq, rr = _global_flops(op, ell, q, chi_sk, eta_q)
                         cand = {"ell": ell, "q": q, "chi_sk": chi_sk, "eta_q": eta_q,
                                 "eps": res.eps_proj, "flops": gflops, "sketch": sk, "ttqr": tq, "r": rr}
@@ -189,15 +196,30 @@ def _run_trial(task):
         }]
 
 
+def _est_task_bytes(args):
+    """Conservative dense-column peak at the largest Lx, capped at the dense budget.
+
+    Above the budget a trial runs matrix-free (small footprint), so the per-worker
+    peak never exceeds ~the dense budget; below it, this bounds the real dense cost.
+    Used to cap the worker count so N processes cannot collectively exhaust RAM."""
+    maxlx = max(args.lxs)
+    dense_peak = 3.0 * dense_column_nbytes(args.phys ** maxlx, args.chi ** maxlx)
+    return int(min(dense_peak, 3.0 * DEFAULT_DENSE_MAX_GB * (1024 ** 3)))
+
+
 def run(args):
-    workers = auto_worker_count(args.workers)
+    workers = auto_worker_count(args.workers, est_bytes_per_task=_est_task_bytes(args))
     tasks = [(args, kind, lx, seed)
              for kind in args.states for lx in args.lxs for seed in range(args.seeds)]
-    rows = flatten(run_parallel(_run_trial, tasks, workers))
-
     stamp = timestamp_slug()
     csv_path, fig_path = output_paths(SUITE, f"exp8-matched-cost-{stamp}")
-    write_csv(csv_path, rows)
+
+    # incremental write: a crash mid-sweep keeps every completed trial on disk
+    rows = []
+    with IncrementalCsvWriter(csv_path) as writer:
+        for batch in run_parallel_stream(_run_trial, tasks, workers):
+            writer.write(batch)
+            rows.extend(batch)
     make_plot(rows, fig_path, args)
     return csv_path, fig_path
 
