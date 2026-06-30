@@ -197,14 +197,18 @@ def _run_trial(task):
 
 
 def _est_task_bytes(args):
-    """Conservative dense-column peak at the largest Lx, capped at the dense budget.
+    """Per-trial peak RSS estimate -> caps the worker count so N processes cannot OOM.
 
-    Above the budget a trial runs matrix-free (small footprint), so the per-worker
-    peak never exceeds ~the dense budget; below it, this bounds the real dense cost.
-    Used to cap the worker count so N processes cannot collectively exhaust RAM."""
+    Max of two terms: the dense column peak (capped at the budget; above it the QR runs
+    matrix-free) and the TEBD state prep, which DOMINATES and scales steeply with the
+    vertical bond ``eta`` (exact-contraction RSS: ~3 GB at eta=4, ~21-30 GB at eta=6 on
+    this suite -> ~(eta/4)^5.2). The prep term is what drove the 108 GB OOM, not the
+    column. See reports/incidents/2026-06-29."""
     maxlx = max(args.lxs)
-    dense_peak = 3.0 * dense_column_nbytes(args.phys ** maxlx, args.chi ** maxlx)
-    return int(min(dense_peak, 3.0 * DEFAULT_DENSE_MAX_GB * (1024 ** 3)))
+    dense_peak = min(3.0 * dense_column_nbytes(args.phys ** maxlx, args.chi ** maxlx),
+                     3.0 * DEFAULT_DENSE_MAX_GB * (1024 ** 3))
+    prep_peak = 3.0e9 * (args.eta / 4.0) ** 5.2 * (args.chi / 8.0) ** 5.2
+    return int(max(dense_peak, prep_peak))
 
 
 def run(args):
