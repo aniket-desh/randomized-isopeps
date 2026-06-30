@@ -334,18 +334,20 @@ def make_plot(rows, fig_path, args):
     write_line_panels(sec, [d1, d2], width=980, height=380)
 
     # ---- PARETO ----
+    # Scatter (no connecting lines): each point is one column's (cost, error). Connecting
+    # sorted-by-x points zigzags meaninglessly (seeds stack at a fixed per-Lx local cost),
+    # and a Pareto is about the lower-left envelope, not a curve. log-x spreads the ~2-decade
+    # FLOP range so the Lx clusters separate instead of crowding near the origin.
     par = str(Path(fig_path).with_name(Path(fig_path).stem + "-pareto.pdf"))
     series = []
     for who, key, col, mk in (("local full", "local_flops", "#0072b2", "o"),
                               ("global propagated", "global_prop_flops", "#222222", "D")):
         xs = [float(r[key]) for r in phys]
-        ys = [float(r["local_eps" if who == "local full" else "global_eps"]) for r in phys]
-        order = np.argsort(xs)
-        series.append(Series(label=who, x=[xs[i] for i in order], y=[max(ys[i], 1e-16) for i in order],
-                             color=col, marker=mk, linestyle="-" if who == "local full" else ":"))
-    pp = Panel(f"Pareto: error vs propagated cost ({note})", "total sweep FLOPs",
-               r"$\|C-\hat C\|_F/\|C\|_F$", "log", series)
-    write_line_panels(par, [pp], width=560, height=380)
+        ys = [max(float(r["local_eps" if who == "local full" else "global_eps"]), 1e-16) for r in phys]
+        series.append(Series(label=who, x=xs, y=ys, color=col, marker=mk, linestyle="None"))
+    pp = Panel(f"Pareto: error vs propagated cost ({note})", "total sweep FLOPs (log)",
+               r"$\|C-\hat C\|_F/\|C\|_F$", "log", series, xscale="log")
+    write_line_panels(par, [pp], width=620, height=400)
 
 
 def parse_args():

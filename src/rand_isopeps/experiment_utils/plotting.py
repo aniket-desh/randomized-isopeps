@@ -266,6 +266,10 @@ class Panel:
     series: list[Series]
     vlines: list[float] | None = None  # optional vertical reference lines (e.g. k1, k2)
     hlines: list[float] | None = None  # optional horizontal reference lines (e.g. sanity 1e-12)
+    # x-axis scale. Defaults to "linear" (integer ticks -- the right choice for the
+    # common case where x is the column height Lx). Set "log" when x spans orders of
+    # magnitude, e.g. a Pareto of error vs sweep FLOPs, so the clusters spread out.
+    xscale: Literal["linear", "log"] = "linear"
 
 
 def _log_span_decades(panel: Panel) -> float:
@@ -346,7 +350,13 @@ def _draw_panel(ax, panel: Panel, legend: dict[str, Line2D]) -> None:
         ax.yaxis.get_offset_text().set_size(8)
         ax.grid(True, which="major", axis="both", color="#e6e6e6", linewidth=0.7)
 
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=6))
+    if panel.xscale == "log":
+        ax.set_xscale("log")
+        ax.xaxis.set_major_locator(LogLocator(base=10.0))
+        ax.xaxis.set_minor_locator(LogLocator(base=10.0, subs=tuple(i * 0.1 for i in range(2, 10))))
+        ax.grid(True, which="minor", axis="x", color="#f2f2f2", linewidth=0.5)
+    else:
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=6))
     ax.tick_params(length=3)
     ax.set_axisbelow(True)
 
