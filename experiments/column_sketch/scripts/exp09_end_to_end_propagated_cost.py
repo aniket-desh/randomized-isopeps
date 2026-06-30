@@ -77,7 +77,7 @@ from rand_isopeps.parallel import (
     run_parallel_stream,
     with_blas_threads,
 )
-from rand_isopeps.plotting import Panel, Series, state_style, write_line_panels
+from rand_isopeps.plotting import Panel, Series, method_style, state_style, write_line_panels
 
 SUITE = "column_sketch"
 
@@ -348,6 +348,47 @@ def make_plot(rows, fig_path, args):
     pp = Panel(f"Pareto: error vs propagated cost ({note})", "total sweep FLOPs (log)",
                r"$\|C-\hat C\|_F/\|C\|_F$", "log", series, xscale="log")
     write_line_panels(par, [pp], width=620, height=400)
+
+    make_headline(rows, fig_path, args)
+
+
+def make_headline(rows, fig_path, args):
+    """Boss-facing 2-panel headline (docs/PLOT.md grammar, styled via ``method_style``):
+
+    Panel A (the WHY) -- global has no disentangler, so it needs a larger vertical bond to
+    match local's accuracy; Panel B (the SO-WHAT) -- that makes it cheaper to factor a column
+    but, as the column grows, the fatter carry bond's downstream cost overtakes the saving.
+    The disentangler contrast lives in the legend; the cost-ratio series reuse the main
+    figure's colours for cross-figure consistency. Default accuracy target, TFIM only.
+    """
+    eta0 = args.eta_targets[len(args.eta_targets) // 2]
+    phys = _phys(rows, eta0)
+    lxs = sorted({int(r["lx"]) for r in phys}) or sorted({int(r["lx"]) for r in rows})
+    x = [float(v) for v in lxs]
+
+    def med(key):
+        return _median_vs_lx(phys, key, lxs)
+
+    # Panel A -- vertical bond needed to match accuracy (the disentangler cost)
+    _, c_loc, m_loc, _ = method_style("local_det")
+    _, c_glob, m_glob, _ = method_style("global_rmps")
+    loc_eta = Series(label="local Moses (with disentangler)", x=x, y=[float(eta0)] * len(x),
+                     color=c_loc, marker=m_loc, linestyle="--")
+    glob_eta = Series(label="global sketch (no disentangler)", x=x, y=med("eta_q"),
+                      color=c_glob, marker=m_glob, linestyle="-")
+    pa = Panel("Vertical bond to match accuracy", r"column height $L_x$",
+               r"vertical bond $\eta$", "linear", [loc_eta, glob_eta])
+
+    # Panel B -- matched-accuracy speedup vs system size (same series/colours as the main fig)
+    fact = Series(label="per-column factorization", x=x, y=med("ratio_fact"),
+                  color=method_style("local_rand")[1], marker="s", linestyle=":")
+    prop = Series(label="end-to-end (with propagation)", x=x, y=med("ratio_prop"),
+                  color=method_style("global_gauss")[1], marker="o", linestyle="-")
+    pb = Panel("Matched-accuracy speedup (above 1: global cheaper)", r"column height $L_x$",
+               "local FLOPs / global FLOPs", "log", [fact, prop], hlines=[1.0])
+
+    head = str(Path(fig_path).with_name(Path(fig_path).stem + "-headline.pdf"))
+    write_line_panels(head, [pa, pb], width=980, height=380)
 
 
 def parse_args():
