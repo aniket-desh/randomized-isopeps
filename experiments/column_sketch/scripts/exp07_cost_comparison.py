@@ -167,13 +167,15 @@ def make_plot(rows, fig_path, args):
     xs = sorted({int(r["lx"]) for r in rows})
     ratio = [float(np.median([float(r["flop_ratio"]) for r in rows if int(r["lx"]) == x])) for x in xs]
     panel_a = Panel(
-        "Column-factorization FLOPs", r"column height $L_x$", "FLOPs", "log",
+        "Column-factorization FLOPs (fixed point)", r"column height $L_x$", "FLOPs", "log",
         _series(rows, SERIES_ORDER),
     )
     panel_b = Panel(
-        # title carries the directional reading so the y-label stays short/precise
-        "FLOP ratio (below 1: global costs more)", r"column height $L_x$",
-        "local FLOPs / global FLOPs", "log",
+        # title flags that this is the FIXED point, NOT accuracy-matched: global is
+        # charged at ell=eta+oversample, eta_q=eta -- overkill for an effective-rank ~2
+        # physical column. exp08 is the accuracy-matched counterpart (where it ties).
+        "FLOP ratio (fixed point; below 1: global costs more)",
+        r"column height $L_x$", "local FLOPs / global FLOPs", "log",
         [Series(label="local / global", x=[float(x) for x in xs], y=ratio,
                 color="#222222", marker="o")],
         hlines=[1.0],  # break-even: above 1 local costs more, below 1 global costs more
