@@ -135,6 +135,37 @@ residual is lossless at the scale that matters.
 
 ---
 
+## 4b. The three-way accuracy comparison
+
+Putting the three methods side by side as projection error
+$\varepsilon_{\text{proj}} = \|(I-QQ^\dagger)C\|_F/\|C\|_F$ at fixed vertical bond, on the
+real TFIM columns ($L_x=3$ dropped as degenerate — those columns are near-exactly low-rank,
+$\varepsilon \sim 10^{-14}$):
+
+![Three-way comparison](figures/column_sketch/exp10-disentangler-comparison.png)
+
+| $L_x$ | m1 plain $\eta_q{=}4$ (no D) | **m3 local (target)** | m1 plain $\eta_q{=}8$ (fat carry) | m2 disentangled, best case |
+|:--:|:--:|:--:|:--:|:--:|
+| 4 | 0.0349 | **0.0210** | 0.0042 | 0.0042 |
+| 5 | 0.0597 | **0.0225** | 0.0120 | 0.0120 |
+
+Reading the left panel: **m1 plain global at the thin bond $\eta_q=4$ (orange) fails to
+reach local** — it is the worst curve. To match local it must spend $\eta_q=8$ (the fat
+carry), which lands it at $\varepsilon \approx 0.004\!-\!0.012$. **m2 (green)** holds the thin
+bond $\eta=4$; the green line is its **best-case** column (the composite $\eta\kappa=8$
+range, a build we verify is a genuine isometry, `iso_defect ~ 1e-15`, and which reduces
+*exactly* to the plain sweep at $\kappa=1$), and the shaded band is the **rigorous bracket**
+$[\varepsilon(\eta_q{=}\eta\kappa),\ \varepsilon(\eta_q{=}\eta)]$ inside which m2's true error
+must lie. The right panel is the payoff: **local and m2 hold $\eta=4$; only plain global
+must grow to $6\!-\!8$** — and that bond is the downstream carry.
+
+The honest reading: **m2's captured range beats local** (its best case, $0.0042$, is below
+local's $0.0210$), and local sits *inside* m2's band — so m2 is at least competitive with
+local and, in its best case, better, all while holding the thin carry. What the band does
+*not* yet do is collapse to a single point (see the caveat).
+
+---
+
 ## 5. End-to-end: the verdict flips
 
 Charging the disentangled-global column at vertical bond $\eta=4$ with carry $=\eta$ (the
@@ -174,17 +205,30 @@ meaningfully comparable — consistent with exp09's treatment.)
   is calibrated against the prior result.
 
 **The one modeling assumption the cost flip rides on:** that the disentangled-global column
-at $\eta=4$ actually reaches `local_eps`. Its accuracy is bracketed rigorously by
-$\varepsilon_{\text{proj}}(\eta_q = \eta\kappa)$ (best case, the range the composite subspace
-spans) plus the residual-truncation loss $\sqrt{\sum_i \tau_i^2(D^\star)}/\|Y\|$, and that
-loss is measured to be $\sim\!10^{-4}$ — three orders below the $10^{-2}$ error it stands in
-for. The assumption is further motivated by the fact that **local Moses at $\eta=4$ is itself
-a disentangled $\eta{=}4$ column** achieving `local_eps`, and the sketch faithfully carries
-the range (§3). What is *not* yet done: building the disentangled-global column with its
-bounded-$\kappa$ residual MPS explicitly and measuring its $\varepsilon_{\text{proj}}$
-against local directly. That is the decisive validation and the recommended next step; the
-end-to-end $17\!-\!20\times$ should be read as a **model projection under a well-supported
-assumption**, not a measured column error.
+at $\eta=4$ actually reaches `local_eps`. The direct-build attempt (§4b) sharpened exactly
+what is and is not settled:
+
+- **Settled (verified builds).** m2's *best-case* column — the composite $\eta\kappa$
+  isometry — is a genuine output-isometric column (`iso_defect ~ 1e-15`) that reduces
+  *exactly* to the plain sweep at $\kappa=1$, and its $\varepsilon_{\text{proj}}$ ($0.0042$
+  at $L_x=4$) **beats local** ($0.0210$). So the sketch + disentangler retains a range rich
+  enough to match or beat local, with the vertical bond provably held at $4$. m2's true
+  error is rigorously **bracketed** in $[\varepsilon(\eta_q{=}\eta\kappa),\
+  \varepsilon(\eta_q{=}\eta)] = [0.0042,\ 0.0349]$, with local *inside* it.
+- **Not settled.** The exact point in that band — m2 with a *bounded-$\kappa$* residual, the
+  fair thin-carry version — is not yet built. It needs the residual-MPS / zip-up
+  construction, which has no clean shortcut on a bare sketch (a quick numpy version I tried
+  *over-counted*: it produced $\varepsilon$ below the rigorous best-case bound, an impossible
+  value, so I discarded it rather than report it). The residual-truncation loss
+  ($\sim\!10^{-4}$, three orders below the $10^{-2}$ error) and the fact that **local Moses is
+  itself a disentangled $\eta{=}4$ column** both argue m2 lands near the good edge — but that
+  is evidence, not the built object.
+
+So the end-to-end $17\!-\!20\times$ should be read as a **model projection**: rigorous on the
+range side (best case beats local, bond held at 4), resting on the well-supported but not-yet-
+independently-measured assumption that the *bounded-residual* m2 reaches `local_eps`. Building
+that residual-MPS column (gated on the same `iso_defect` + bracket + monotonicity harness) is
+the decisive next step.
 
 Conservative choices baked in: the disentangled carry is charged at $\eta=4$ (= local's
 measured carry, not the smaller $\kappa$); the disentangler FLOPs are charged in full at

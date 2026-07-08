@@ -37,6 +37,7 @@ import numpy as np
 import scipy.linalg as la
 
 from rand_isopeps.column.operator import ColumnOperator
+from rand_isopeps.column.structured_qr import structured_column_qr
 from rand_isopeps.experiment_utils.cost_model import svd_flops
 from rand_isopeps.linalg.rmps_sketch import rmps_test_matrix
 from rand_isopeps.moses.disentangler import disentangle_altmin, tail_energy
@@ -275,3 +276,73 @@ class DisentangledCost:
     eta_q_equiv: int          # eta*kappa: the plain vertical bond whose RANGE this matches
     residual_loss: float      # sqrt(sum_i dis_tail)/||Y||: energy the kappa residual drops
     n_disentangled: int
+
+
+@dataclass
+class DisentangledColumnResult:
+    """The disentangled-global column's accuracy, bracketed rigorously (verified builds)."""
+
+    eta: int
+    kappa: int
+    eps_best: float           # ||(I-QQ*)C||/||C|| of the composite (eta*kappa) isometry -- BEST case
+    eps_worst: float          # same at the plain vertical bond eta -- WORST case (no residual)
+    best_iso_defect: float    # ||Q*Q - I|| of the best-case column (should be ~eps)
+    residual_loss: float      # disentangler's rank-eta tails, sqrt(sum)/||Y|| (<< eps => near best)
+    n_out: int
+    final_bond_best: int      # columns of the best-case isometry (its captured range dim)
+
+
+def disentangled_column_qr(
+    column: ColumnOperator,
+    eta: int,
+    kappa: int,
+    ell: int,
+    chi_sk: int = 8,
+    n_power: int = 1,
+    ndis: int = 10,
+    rng: np.random.Generator | None = None,
+    reference: np.ndarray | None = None,
+) -> DisentangledColumnResult:
+    """Disentangled-global column accuracy, rigorously **bracketed** (no fragile build).
+
+    The disentangled column holds vertical bond ``eta`` and spills the excess into a
+    bounded horizontal residual bond ``kappa``. Its true projection error
+    ``||(I - Q Q^*) C||_F / ||C||_F`` is bracketed between two builds we CAN do exactly
+    with the verified structured QR:
+
+    * ``eps_best`` -- the composite ``eta*kappa`` isometry (residual fully kept); a genuine
+      output-isometric column (``best_iso_defect ~ eps``). No disentangled column can beat
+      this (it cannot capture more than the composite it retains).
+    * ``eps_worst`` -- the plain vertical bond ``eta`` (no residual). The disentangled
+      column's range contains this, so it is at least this accurate.
+
+    The disentangler's own rank-``eta`` second-SVD tails (``residual_loss``, from
+    :func:`mechanism_profile`) measure how much of the composite the bounded-``kappa``
+    residual must drop; ``residual_loss << eps_best`` means the true error hugs the best
+    edge. This is the honest, verifiable characterization -- the exact bounded-residual
+    isoPEPS build (with the zip-up residual MPS) is the one remaining refinement.
+    """
+    gen = np.random.default_rng() if rng is None else rng
+    c = column.materialize() if reference is None else reference
+    n_out = int(c.shape[0])
+    eta_eq = min(int(eta) * int(kappa), n_out)
+
+    # Both bracket endpoints use the SAME sketch (a clean bracket differs only by eta_q, not
+    # by sketch noise) -- so at kappa=1 (eta_eq == eta) the two builds are bit-identical.
+    ell_shared = max(ell, eta_eq + 4)
+    seed_shared = int(gen.integers(1 << 30))
+    best = structured_column_qr(column, ell=ell_shared, eta_q=eta_eq, chi_sk=chi_sk,
+                                n_power=n_power, rng=np.random.default_rng(seed_shared), reference=c)
+    worst = structured_column_qr(column, ell=ell_shared, eta_q=int(eta), chi_sk=chi_sk,
+                                 n_power=n_power, rng=np.random.default_rng(seed_shared), reference=c)
+    y, _ = sketch_range(column, ell=max(ell, eta_eq + 2), chi_sk=chi_sk, n_power=n_power,
+                        rng=gen, reference=c)
+    prof = mechanism_profile(y, column.output_dims, int(eta), int(kappa), (int(eta),),
+                             ndis=int(ndis), rng=np.random.default_rng(int(gen.integers(1 << 30))))
+    resid_loss = summarize(prof, float(np.linalg.norm(y))).tau_dis
+
+    return DisentangledColumnResult(
+        eta=int(eta), kappa=int(kappa), eps_best=best.eps_proj, eps_worst=worst.eps_proj,
+        best_iso_defect=best.delta_global, residual_loss=resid_loss, n_out=n_out,
+        final_bond_best=best.final_bond,
+    )

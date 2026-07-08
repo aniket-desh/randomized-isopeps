@@ -98,7 +98,8 @@ def main() -> None:
         a10 = argparse.Namespace(eta=4, kappa=2, ndis_scan=[0, 1, 3, 5, 10])
         m10.make_plots(rs10, os.path.join(DEST, "exp10-disentangler.png"), a10)
         names += ["exp10-disentangler.png", "exp10-disentangler-bottleneck.png",
-                  "exp10-disentangler-frontier.png", "exp10-disentangler-headline.png"]
+                  "exp10-disentangler-frontier.png", "exp10-disentangler-comparison.png",
+                  "exp10-disentangler-headline.png"]
     except SystemExit:
         print("  (skipping exp10 -- no exp10-disentangler CSV found)")
 

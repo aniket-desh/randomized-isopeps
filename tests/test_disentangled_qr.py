@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from rand_isopeps.column.disentangled_qr import (
+    disentangled_column_qr,
     disentangler_flops,
     mechanism_profile,
     sketch_range,
@@ -88,6 +89,29 @@ def test_summary_and_flops_are_finite_and_positive():
     assert s.max_null_std < 1e-10
     flops = disentangler_flops(op.output_dims, ell=10, eta=2, kappa=2, ndis=5)
     assert flops > 0.0 and np.isfinite(flops)
+
+
+def test_disentangled_column_bracket_and_isometry():
+    # The disentangled-column accuracy bracket: best case (composite eta*kappa isometry)
+    # is at least as accurate as the worst case (plain vertical eta), and the best-case
+    # column is a genuine isometry.
+    op = _op(lx=4, seed=7)
+    c = op.materialize()
+    res = disentangled_column_qr(op, eta=2, kappa=2, ell=10, chi_sk=8, n_power=1, ndis=8,
+                                 rng=np.random.default_rng(1), reference=c)
+    assert res.eps_best <= res.eps_worst + 1e-9        # more range never hurts
+    assert res.best_iso_defect < 1e-8                  # best-case column is a real isometry
+    assert 0.0 <= res.eps_best <= 1.5 and 0.0 <= res.eps_worst <= 1.5
+    assert res.final_bond_best <= res.eta * res.kappa
+
+
+def test_disentangled_column_kappa_one_collapses_bracket():
+    # kappa=1 -> composite bond == eta, so best and worst are the SAME plain-eta build.
+    op = _op(lx=4, seed=3)
+    c = op.materialize()
+    res = disentangled_column_qr(op, eta=3, kappa=1, ell=10, chi_sk=8, n_power=1, ndis=8,
+                                 rng=np.random.default_rng(2), reference=c)
+    assert res.eps_best == pytest.approx(res.eps_worst, rel=1e-6, abs=1e-9)
 
 
 def test_larger_kappa_reaches_deeper():

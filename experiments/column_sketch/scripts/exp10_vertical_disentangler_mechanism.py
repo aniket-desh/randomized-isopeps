@@ -373,7 +373,56 @@ def make_plots(rows, fig_path, args):
                r"disentangler iterations $N_{\mathrm{dis}}$", "added FLOPs", "log", [fseries])
     write_line_panels(fr, [pe, pf], width=980, height=380)
 
+    make_comparison(phys, fig_path, args, lxs)
     make_headline(phys, fig_path, args, lxs)
+
+
+def make_comparison(phys, fig_path, args, lxs):
+    """The three-way accuracy comparison the study set out to make, as projection error
+    eps_proj = ||(I-QQ*)C||/||C|| vs Lx, at fixed vertical bond:
+
+      m1 plain global sketch      -- thin bond eta_q=4 (FAILS local) and fat bond eta_q=8 (matches);
+      m2 global sketch + disent.  -- vertical bond held at eta=4, shown as its VERIFIED best-case
+                                     isometry (= composite eta*kappa range) with the rigorous band
+                                     down to the plain-eta worst case (its true error lies in the band);
+      m3 local Moses move         -- the paper's disentangled eta=4 factorization (the target).
+    """
+    eta = args.eta
+    # Drop degenerate Lx (near-exactly low-rank columns, eps ~ machine precision) so the
+    # informative range is not crushed -- keep Lx where the local target is a real error.
+    lxs = [lx for lx in lxs if (_median_vs_lx(phys, "local_eps", [lx])[0] or 0.0) > 1e-6]
+    if not lxs:
+        return
+    x = [float(v) for v in lxs]
+
+    def med(key):
+        return _median_vs_lx(phys, key, lxs)
+
+    loc = Series(label="m3 local Moses (target)", x=x, y=med("local_eps"),
+                 color=method_style("local_det")[1], marker="o", linestyle="-")
+    p4 = Series(label=rf"m1 plain global $\eta_q={eta}$ (no D)", x=x, y=med(f"eps_etaq_{eta}"),
+                color=method_style("global_kron")[1], marker="^", linestyle="--")
+    p8 = Series(label=r"m1 plain global $\eta_q=8$ (fat carry)", x=x, y=med("eps_etaq_8"),
+                color=method_style("global_gauss")[1], marker="s", linestyle=":")
+    # m2: best-case isometry (lower edge) with the rigorous band up to the plain-eta worst case
+    best = med("dis_eps_bestcase")
+    worst = med(f"eps_etaq_{eta}")
+    m2 = Series(label=rf"m2 disentangled global $\eta={eta}$ (best + band)", x=x, y=best,
+                ylow=best, yhigh=worst, color=method_style("global_rmps")[1], marker="D", linestyle="-")
+    pa = Panel(r"Projection error at fixed vertical bond", r"column height $L_x$",
+               r"$\|(I-QQ^*)C\|_F/\|C\|_F$", "log", [loc, p4, p8, m2])
+
+    # companion: the vertical bond / downstream carry each method commits to
+    b_loc = Series(label="m3 local", x=x, y=[float(eta)] * len(x),
+                   color=method_style("local_det")[1], marker="o", linestyle="-")
+    b_pl = Series(label="m1 plain global (to match)", x=x, y=med("eta_q"),
+                  color=method_style("global_gauss")[1], marker="s", linestyle=":")
+    b_dis = Series(label="m2 disentangled global", x=x, y=[float(eta)] * len(x),
+                   color=method_style("global_rmps")[1], marker="D", linestyle="-")
+    pb = Panel("Vertical bond held (= downstream carry)", r"column height $L_x$",
+               r"vertical bond $\eta$", "linear", [b_pl, b_loc, b_dis])
+    cmp_path = str(Path(fig_path).with_name(Path(fig_path).stem + "-comparison.pdf"))
+    write_line_panels(cmp_path, [pa, pb], width=980, height=380)
 
 
 def make_headline(phys, fig_path, args, lxs):
