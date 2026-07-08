@@ -90,6 +90,18 @@ def main() -> None:
         except SystemExit:
             print(f"  (skipping {png} -- no {prefix} CSV found)")
 
+    # exp10 renders four sibling figures (main mechanism + -bottleneck/-frontier/-headline)
+    # via its own ``make_plots``; add them if a sweep CSV exists.
+    try:
+        m10 = _load("exp10_vertical_disentangler_mechanism.py")
+        rs10 = [r for r in _latest("exp10-disentangler") if any(r.values())]
+        a10 = argparse.Namespace(eta=4, kappa=2, ndis_scan=[0, 1, 3, 5, 10])
+        m10.make_plots(rs10, os.path.join(DEST, "exp10-disentangler.png"), a10)
+        names += ["exp10-disentangler.png", "exp10-disentangler-bottleneck.png",
+                  "exp10-disentangler-frontier.png", "exp10-disentangler-headline.png"]
+    except SystemExit:
+        print("  (skipping exp10 -- no exp10-disentangler CSV found)")
+
     # ``names`` tracks the figures we explicitly asked each experiment to render; the
     # plot helpers also emit a ``.pdf`` twin and (for some experiments) a ``-sanity`` /
     # ``-diagnostics`` sibling. List everything actually written so the report is honest.

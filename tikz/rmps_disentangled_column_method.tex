@@ -1,0 +1,104 @@
+\documentclass[tikz,border=5pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{tensor-network}
+\usetikzlibrary{calc,positioning,backgrounds}
+
+\definecolor{activeblue}{RGB}{35,105,165}
+\definecolor{sketchgreen}{RGB}{38,127,84}
+\definecolor{dispurple}{RGB}{102,60,140}
+\definecolor{isoorange}{RGB}{190,110,25}
+\definecolor{resred}{RGB}{155,55,55}
+\definecolor{contextgray}{RGB}{155,155,155}
+
+\tnsetup{tensorsize=12pt,xscale=1,yscale=1,outer xsep=1pt,outer ysep=3pt}
+
+\begin{document}
+\begin{tikzpicture}[tensornetwork, line cap=round, line join=round]
+
+% --------------------------------------------------------------------------
+% Left: active PEPS column C_j contracted with rMPS sketch Omega
+% --------------------------------------------------------------------------
+\foreach \xi/\xx in {0/0,1/1.0}{
+  \foreach \y in {0,1,2,3}{
+    \node[atensor, minimum size=10pt, fill=contextgray!8, draw=contextgray!65] (g\xi\y) at (\xx,\y) {};
+  }
+}
+\foreach \xi in {0,1}{
+  \draw[contextgray!60, thin] (g\xi0) -- (g\xi1) -- (g\xi2) -- (g\xi3);
+}
+\foreach \y in {0,1,2,3}{
+  \draw[contextgray!60, thin] (g0\y) -- (g1\y);
+}
+
+% active column
+\foreach \y/\i in {0/1,1/2,2/3,3/4}{
+  \node[atensor, minimum size=13pt, fill=activeblue!10, draw=activeblue, very thick] (c\i) at (2.15,\y) {};
+  \draw[activeblue, thick] (c\i.west) -- +( -0.55,0);
+}
+\draw[activeblue, thick] (c1) -- (c2) -- (c3) -- (c4);
+\draw[activeblue, thick] (c1.south) -- +(0,-0.35);
+\draw[activeblue, thick] (c4.north) -- +(0,0.35);
+\node[activeblue, above=6pt of c4] {$C_j$};
+
+% rMPS sketch probe chain
+\foreach \y/\i in {0/1,1/2,2/3,3/4}{
+  \node[atensor, minimum size=12pt, fill=sketchgreen!10, draw=sketchgreen, thick] (o\i) at (3.55,\y) {};
+  \draw[sketchgreen, thick] (c\i.east) -- (o\i.west);
+}
+\draw[sketchgreen, thick] (o1) -- (o2) -- (o3) -- (o4);
+\draw[sketchgreen, thick] (o1.south) -- +(0,-0.35);
+\draw[sketchgreen, thick] (o4.north) -- +(0,0.35);
+\node[sketchgreen, above=6pt of o4] {$\Omega_{\mathrm{rMPS}}$};
+\node[below=9pt] at (1.8,-0.35) {$Y=C_j\Omega$};
+
+% transition arrow 1
+\draw[->, very thick, black!70] (4.45,1.5) -- (5.25,1.5);
+
+% --------------------------------------------------------------------------
+% Middle: sampled range Y with disentanglers at the three internal cuts
+% --------------------------------------------------------------------------
+\foreach \y/\i in {0/1,1/2,2/3,3/4}{
+  \node[atensor, minimum size=14pt, fill=activeblue!10, draw=activeblue, thick] (y\i) at (6.15,\y) {$Y_{\i}$};
+}
+\draw[activeblue, thick] (y1) -- (y2) -- (y3) -- (y4);
+\draw[activeblue, thick] (y1.south) -- +(0,-0.35);
+\draw[activeblue, thick] (y4.north) -- +(0,0.35);
+\node[activeblue, above=6pt of y4] {$Y$};
+
+% Disentanglers, one at each vertical split (schematic local gauge in the sweep)
+\foreach \yy/\k in {0.5/1,1.5/2,2.5/3}{
+  \coordinate (cut\k) at (6.15,\yy);
+  \draw[dispurple, thick] (cut\k) -- +(0.48,0);
+  \node[dtensor, minimum size=13pt, fill=dispurple!10, draw=dispurple, thick] (d\k) at (6.95,\yy) {$D_{\k}$};
+  \draw[dispurple, thick] (d\k.east) -- +(0.35,0);
+}
+\node[below=10pt, align=center] at (6.65,-0.35) {$\{D_i\}$, $\operatorname{TT\!\text{-}SVD}_{\eta}$};
+
+% transition arrow 2
+\draw[->, very thick, black!70] (7.85,1.5) -- (8.65,1.5);
+
+% --------------------------------------------------------------------------
+% Right: isometric column Q_iso and residual R
+% --------------------------------------------------------------------------
+\foreach \y/\i in {0/1,1/2,2/3,3/4}{
+  \node[ltensor, minimum size=14pt, fill=isoorange!10, draw=isoorange, very thick] (q\i) at (9.65,\y) {$q_{\i}$};
+  \node[atensor, minimum size=14pt, fill=resred!8, draw=resred, thick] (r\i) at (11.05,\y) {$R_{\i}$};
+  \draw[isoorange, thick] (q\i.west) -- +(-0.5,0);
+  \draw[resred, thick] (r\i.east) -- +(0.5,0);
+  \draw[black!55, thin] (q\i.east) -- (r\i.west);
+}
+\draw[isoorange, thick, ->] (q1) -- (q2);
+\draw[isoorange, thick, ->] (q2) -- (q3);
+\draw[isoorange, thick, ->] (q3) -- (q4);
+\draw[isoorange, thick] (q1.south) -- +(0,-0.35);
+\draw[isoorange, thick] (q4.north) -- +(0,0.35);
+\draw[resred, thick] (r1) -- (r2) -- (r3) -- (r4);
+\draw[resred, thick] (r1.south) -- +(0,-0.35);
+\draw[resred, thick] (r4.north) -- +(0,0.35);
+\node[isoorange, above=6pt of q4] {$Q_{\mathrm{iso}}$};
+\node[resred, above=6pt of r4] {$R$};
+\node[isoorange] at (9.45,-0.55) {$q_i^\dagger q_i=I$};
+\node at (10.35,-1.05) {$C_j\approx Q_{\mathrm{iso}}R$};
+
+\end{tikzpicture}
+\end{document}
