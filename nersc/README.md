@@ -348,8 +348,12 @@ nodes have no internet, so a job that pushes just hangs. The network steps brack
 ```
 
 - **`nersc/deploy.sh [branch]`** *(login node)* — clones into `$PSCRATCH/randomized-isopeps`
-  if missing (e.g. after a scratch purge), else fast-forwards; reinstalls only if
-  `pyproject.toml` changed. Override the location with `RISOPEPS_DIR`.
+  if missing (e.g. after a scratch purge), else fast-forwards; then **re-points the env's
+  editable install at this checkout** (fast `pip -e --no-deps` re-link; full reinstall only if
+  `pyproject.toml` moved). This matters: the env imports `rand_isopeps` from wherever pip last
+  ran, so deploying without the re-link runs *old library code under new scripts*. Override
+  the location with `RISOPEPS_DIR`. If you pull a checkout by hand instead of using deploy.sh,
+  run `pip install -e . --no-deps` yourself (with the env active).
 - **`nersc/publish.sh ["msg"]`** *(login node, after the job)* — regenerates the curated
   figures (`curate_figures.py`) and pushes `reports/figures/` **+ `outputs/`** to an orphan
   `results` branch (a separate worktree, so your run checkout is untouched; never merged to

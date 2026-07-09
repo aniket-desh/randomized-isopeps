@@ -33,10 +33,15 @@ git checkout "$BRANCH"
 git pull --ff-only origin "$BRANCH"
 after="$(git rev-parse HEAD)"
 
-# Reinstall the package only when dependency metadata moved (avoids a slow pip every deploy).
+# Re-point the env's EDITABLE install at THIS checkout. Without this, `import rand_isopeps`
+# resolves to wherever setup_env.sh last ran pip (e.g. a stale $HOME clone) and jobs run old
+# library code against new scripts. --no-deps makes it a fast (~s) idempotent re-link; full
+# dependency resolution only when pyproject.toml actually moved.
 if [ "$before" != "$after" ] && git diff --name-only "$before" "$after" | grep -qx 'pyproject.toml'; then
-  echo "== pyproject.toml changed -> pip install -e '.[quimb]' =="
+  echo "== pyproject.toml changed -> full pip install -e '.[quimb]' =="
   pip install -e ".[quimb]"
+else
+  pip install -e . --no-deps --quiet
 fi
 
 echo "== ready @ ${after:0:9}  ($WORKDIR) =="
