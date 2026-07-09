@@ -259,9 +259,12 @@ python experiments/column_sketch/scripts/exp09_end_to_end_propagated_cost.py --q
 
 ---
 
-## 9. Agent operating guide
+## 9. On-node operating guide
 
-For an automated agent driving NERSC:
+This is the checklist for whoever is **in the NERSC login session** (you by hand — SSH needs
+MFA — or an agent that has an authenticated session). The **local analysis agent does not log
+in**: it works only over git (`git fetch origin results`), so its half of the loop is §11.
+
 - **Never run heavy compute on a login node.** Everything real goes through `sbatch`.
 - **Submit:** `sbatch job.slurm` → prints `Submitted batch job <jobid>` (use `--parsable`
   to get just the id).
@@ -272,7 +275,9 @@ For an automated agent driving NERSC:
 - **Logs:** the `-o/-e` files, default `<jobname>-<jobid>.out` / `.err`.
 - **No internet on compute nodes:** any dependency install is a *separate login-node* step
   (or bake it into `setup_env.sh`). A job that tries to `pip install` will hang/fail.
-- **Purge:** copy `outputs/` from `$PSCRATCH` to CFS as the last step of a run.
+- **Purge:** the templates stage `outputs/` to CFS at the end of a run (scratch is purged).
+- **Publish when the job's done:** `bash nersc/publish.sh` — pushes figures + result data to
+  the `results` branch so the local agent can pick them up over git (§11).
 - **Pick the QOS by size:** `-q debug` (≤30 min) for a fast smoke test, `-q regular` for a
   real run, `-q shared` for anything that doesn't need a whole node.
 - **Always set `--workers` on the experiment command** (default is 4–12 → idle node). Use
@@ -304,24 +309,30 @@ For an automated agent driving NERSC:
 
 ---
 
-## 11. The git round-trip: deploy → run → publish → pull
+## 11. The git round-trip: deploy → run → publish → analyze
 
-The whole loop is git-based, with one hard rule: **`git pull`/`git push` happen on a login
-node, never inside a job** (compute nodes have no internet — a job that tries to push just
-hangs). So the network steps bracket the `sbatch`, they aren't part of it. Three helper
-scripts (`nersc/*.sh`) wrap it:
+The loop is **git-based on purpose**, because of the division of labor:
+
+- **You drive NERSC by hand** (SSH needs MFA). You `deploy`, `sbatch`, and `publish` inside
+  your authenticated login session.
+- **The local agent never logs into NERSC** — it works only over **git**, which needs no MFA.
+  So results have to arrive by `git`, and they do: `publish.sh` pushes **figures *and* the
+  (small) result CSVs** to a `results` branch, and the agent gets everything with one
+  `git fetch`. No rsync, no MFA, no waiting on you.
+
+One hard rule: **`git pull`/`git push` run on a login node, never inside a job** — compute
+nodes have no internet, so a job that pushes just hangs. The network steps bracket the
+`sbatch`; they aren't part of it.
 
 ```
-  local (Mac)          NERSC login node                    NERSC compute node
-  ───────────          ────────────────                    ──────────────────
-  edit + git push  ─▶  bash nersc/deploy.sh [branch]   (git pull, reinstall if deps moved)
-                       sbatch nersc/templates/…     ─▶  job runs, writes outputs/,
-                                                        stages them to CFS
-                   ◀─  bash nersc/publish.sh          (figures → 'results' branch)
-  git fetch results
-  git checkout origin/results -- .   (view PDFs; or just browse them on GitHub)
-  bash nersc/pull_data.sh  ◀────────────────────────  raw CSVs on CFS (rsync, ≤1 GB guard)
-  re-plot locally
+  YOU, local (Mac)        YOU, NERSC login node (MFA)         compute node
+  ────────────────        ───────────────────────────         ────────────
+  edit + git push    ─▶   bash nersc/deploy.sh [branch]    (git pull; reinstall if deps moved)
+                          sbatch nersc/templates/…      ─▶  job runs, writes outputs/, → CFS
+                          bash nersc/publish.sh             (figures + data → 'results' branch)
+                                    │
+  AGENT, local (no MFA):           ▼
+  git fetch origin results  ◀── everything is on the results branch → assess, design next run
   └──────────────────────────────── repeat ──────────────────────────────────┘
 ```
 
@@ -329,23 +340,29 @@ scripts (`nersc/*.sh`) wrap it:
   if missing (e.g. after a scratch purge), else fast-forwards; reinstalls only if
   `pyproject.toml` changed. Override the location with `RISOPEPS_DIR`.
 - **`nersc/publish.sh ["msg"]`** *(login node, after the job)* — regenerates the curated
-  figures (`curate_figures.py`) and pushes **only `reports/figures/`** to a `results` branch
-  (a separate worktree, so your run checkout is untouched). **Figures only — no data in git.**
-- **`nersc/pull_data.sh`** *(local)* — rsyncs the raw `outputs/` CSVs from CFS to `./nersc-data/`
-  (gitignored) so you can re-configure plots on your Mac. Refuses a pull over `MAX_GB` (default
-  **1 GB**) unless `FORCE=1` — narrow `REMOTE_DATA` or plot on NERSC for anything bigger.
+  figures (`curate_figures.py`) and pushes `reports/figures/` **+ `outputs/`** to an orphan
+  `results` branch (a separate worktree, so your run checkout is untouched; never merged to
+  `main`, so `main` stays data-free). The result CSVs are tiny (~12 MB for months of runs), so
+  they ride git. **Size guard:** if `outputs/` exceeds `DATA_MAX_MB` (default **200**), it
+  publishes figures only and tells you to use `pull_data.sh`.
+- **`nersc/pull_data.sh`** *(local)* — the **escape hatch** for a run too big for git: rsyncs
+  the raw `outputs/` from CFS to `./nersc-data/` (gitignored), with a `MAX_GB` guard (default
+  **1 GB**, `FORCE=1` to override). Needs an authenticated NERSC session — either you run it,
+  or the agent can if your `sshproxy` cert is still live (~24 h). Not needed for normal runs.
+
+**Agent, locally:** to read the latest results without disturbing the working branch,
+`git fetch origin results` then either browse on GitHub or add a read-only view:
+`git worktree add ../risopeps-results origin/results`.
 
 **Two setup notes:**
 - **Login-node push needs cached credentials.** The repo is public, but *pushing* the
-  `results` branch needs auth on Perlmutter. Easiest: use an SSH remote
+  `results` branch needs auth on Perlmutter. Easiest: an SSH remote
   (`git remote set-url origin git@github.com:aniket-desh/randomized-isopeps`) with an SSH key
   on NERSC, or a GitHub PAT via `git config --global credential.helper store` + one manual push.
-- **Staging to CFS is what makes `pull_data.sh` work.** The templates end with a
-  `cp -ru outputs/. $CFS_OUT/` line — set `$CFS_OUT` (and `pull_data.sh`'s `REMOTE_DATA`) to
-  the same `/global/cfs/cdirs/<project>/risopeps/outputs` path.
-
-Since there's no agent on NERSC, the split is deliberate: the node only **runs and stages**;
-all plotting/analysis happens locally from the pulled data.
+- **CFS staging is still worth keeping.** The templates' `cp -ru outputs/. $CFS_OUT/` line
+  backs results up off purge-prone scratch and feeds `pull_data.sh` for the big-run case; set
+  `$CFS_OUT` and `pull_data.sh`'s `REMOTE_DATA` to the same
+  `/global/cfs/cdirs/<project>/risopeps/outputs` path.
 
 ---
 

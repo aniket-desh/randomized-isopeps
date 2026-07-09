@@ -1,13 +1,15 @@
 #!/bin/bash
-# Pull RAW experiment data (the gitignored outputs/ CSVs) from NERSC to THIS machine, so you
-# can re-configure / regenerate plots locally. RUN LOCALLY (not on NERSC).
+# ESCAPE HATCH: pull RAW experiment data from NERSC to THIS machine over rsync. RUN LOCALLY.
 #
 #   bash nersc/pull_data.sh
 #
-# Data never enters git -- this is the out-of-band channel for it. There is a size guard:
-# the pull is refused if the remote data exceeds MAX_GB (default 1 GB) unless you FORCE=1.
-# Pull from CFS (backed up, not purged); make sure your job staged results there (the
-# `cp -r outputs /global/cfs/...` line in the templates).
+# Normally you DON'T need this: publish.sh already puts figures + the (small) result CSVs on
+# the 'results' branch, so a plain `git fetch origin results` gives the local agent everything
+# -- no NERSC login, no MFA. Use this script only when a run is too big for git (publish.sh
+# skipped the data because outputs/ > DATA_MAX_MB). It rsyncs from CFS to ./nersc-data/
+# (gitignored) with a MAX_GB guard (default 1 GB, FORCE=1 to override). Needs an authenticated
+# NERSC session (rsync over ssh -> MFA, or a live ~24 h sshproxy cert). Make sure the job
+# staged results to CFS (the `cp -ru outputs/. $CFS_OUT/` line in the templates).
 set -euo pipefail
 
 NERSC_USER="${NERSC_USER:-aniketd}"
