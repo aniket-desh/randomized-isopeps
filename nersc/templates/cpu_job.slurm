@@ -13,7 +13,7 @@
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=you@lbl.gov       # ==EDIT== your email
+#SBATCH --mail-user=aniket4@illinois.edu   # job start/fail emails
 
 module load python
 # Use `source activate` (not `conda activate`) in a batch shell -- the bare form can raise

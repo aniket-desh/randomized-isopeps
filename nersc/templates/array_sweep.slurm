@@ -15,7 +15,7 @@
 #SBATCH --output=%x-%A_%a.out         # %A=array job id, %a=array index
 #SBATCH --error=%x-%A_%a.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=you@lbl.gov       # ==EDIT==
+#SBATCH --mail-user=aniket4@illinois.edu   # job start/fail emails
 
 module load python
 source activate /global/common/software/m4926/rand-isopeps-env   # ==EDIT== (source, not conda)
