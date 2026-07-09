@@ -5,8 +5,10 @@
 #     sbatch nersc/templates/array_sweep.slurm
 #
 #SBATCH --job-name=risopeps-batch
-#SBATCH --account=m4926#SBATCH --constraint=cpu
-#SBATCH --qos=shared                  # partial node, charged fractionally; do NOT set --nodes
+#SBATCH --account=m4926
+#SBATCH --constraint=cpu
+#SBATCH --qos=shared                  # partial node, charged fractionally by cores
+#SBATCH --nodes=1                     # shared REQUIRES --nodes=1 per array task
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32            # cores per array task (shared gives ~4 GB/core -> ~128 GB)
 #SBATCH --time=06:00:00
@@ -35,10 +37,12 @@ CONFIGS=(
 CMD=${CONFIGS[$SLURM_ARRAY_TASK_ID]}
 if [ -z "$CMD" ]; then echo "no CONFIGS entry for index $SLURM_ARRAY_TASK_ID" >&2; exit 1; fi
 
-cd "$PSCRATCH/randomized-isopeps"
+# Run from wherever you submitted (your repo checkout); use a $PSCRATCH checkout for big runs.
+cd "$SLURM_SUBMIT_DIR"
 echo "[array $SLURM_ARRAY_TASK_ID] python $CMD"
 srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores python $CMD
 
 # Tasks share one timestamped outputs/ tree (unique slugs, no collisions). Stage to CFS so
 # nersc/pull_data.sh can fetch it; -u = only copy newer, cheap when tasks overlap.
-CFS_OUT="/global/cfs/cdirs/m4926/risopeps/outputs"        # keepers survive the scratch purgemkdir -p "$CFS_OUT" && cp -ru outputs/. "$CFS_OUT"/ 2>/dev/null || true
+CFS_OUT="/global/cfs/cdirs/m4926/risopeps/outputs"        # keepers survive the scratch purge
+mkdir -p "$CFS_OUT" && cp -ru outputs/. "$CFS_OUT"/ 2>/dev/null || true
