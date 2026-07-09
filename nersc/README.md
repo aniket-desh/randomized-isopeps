@@ -26,9 +26,14 @@ squeue --me                                # watch it
 ```
 
 - This project runs **CPU jobs** (`-C cpu`), not GPU. It's dominated by dense/randomized
-  SVDs, QRs and matmuls, so the lever is **BLAS threads**, not accelerators.
-- Parameter sweeps (instances × sketch seeds × bond) → **Slurm job arrays** and the
-  **`shared`** QOS (partial node, cheap). See §5–6.
+  SVDs, QRs and matmuls.
+- **The levers are two *script* flags, not env vars: `--workers` and `--blas-threads`.** The
+  default worker count is laptop-capped (4–12), so **you must pass `--workers` on a big node**
+  or you'll idle 116+ cores. See §6 — this is the one thing to get right.
+- Parameter sweeps (Lx × states × seeds, or a batch of different ideas) → **one node with
+  `--workers ~120`**, or a **Slurm job array** on the **`shared`** QOS. See §5–6.
+- Large-Lx runs are **memory-bound** (dense column ~`16·2^Lx·8^Lx` bytes); the worker count
+  is auto-capped by RAM. See §6.1.
 
 ---
 
@@ -85,7 +90,9 @@ conda create -y --prefix /global/common/software/$PROJECT/rand-isopeps-env \
 conda activate /global/common/software/$PROJECT/rand-isopeps-env
 pip install -e ".[quimb]"                            # package + real-isoTNS Moses-move extra
 ```
-In every job script you then just `module load python && conda activate <that prefix>`.
+In every job script you then `module load python && source activate <that prefix>` — use
+`source activate` (or source the conda shell hook) in **batch** scripts; a bare
+`conda activate` can raise `CommandNotFoundError` in a non-interactive shell.
 
 ---
 
@@ -124,36 +131,82 @@ experiment, then `sbatch`.
 
 | Template | When | Key flags |
 |---|---|---|
-| [`cpu_job.slurm`](templates/cpu_job.slurm) | **default** — one experiment on a full CPU node | `-C cpu -q regular -N 1 -c 128` |
-| [`array_sweep.slurm`](templates/array_sweep.slurm) | a sweep (seeds/instances/bond), many small tasks | `-q shared --array=0-N -c 16` |
-| [`shared_small.slurm`](templates/shared_small.slurm) | a quick / small run without burning a full node | `-q shared -c 8` |
+| [`cpu_job.slurm`](templates/cpu_job.slurm) | **default** — one experiment on a full CPU node | `-C cpu -q regular -N 1 -c 128` + `--workers` |
+| [`array_sweep.slurm`](templates/array_sweep.slurm) | **batch many ideas at once** — one array task per config | `-q shared --array=0-N` + a `CONFIGS[]` list |
+| [`shared_small.slurm`](templates/shared_small.slurm) | a quick / small run without burning a full node | `-q shared -c 16` |
 | [`gpu_job.slurm`](templates/gpu_job.slurm) | **reference only** — if you ever add a torch/cupy backend | `-C gpu -A …_g --gpus-per-node=4` |
 
-Example experiment line (real isoTNS Moses move, 20 PEPS instances):
+Example experiment line — the current frontier is the `column_sketch` end-to-end cost sweep,
+which is process-parallel (**pass `--workers`**; §6):
 ```bash
 srun -n 1 -c $SLURM_CPUS_PER_TASK --cpu-bind=cores \
-  python experiments/real_moses_move/scripts/exp01_real_moses_move.py --instances 20
+  python experiments/column_sketch/scripts/exp09_end_to_end_propagated_cost.py \
+    --lxs 3 4 5 --states random tfim@3.5 tfim@3.04 --workers 96 --blas-threads 1
 ```
+A quick smoke test (the real isoTNS Moses move):
+```bash
+srun -n 1 -c $SLURM_CPUS_PER_TASK --cpu-bind=cores \
+  python experiments/real_moses_move/scripts/exp01_real_moses_move.py --instances 20 --workers 96
+```
+For a large-Lx single column, flip to the big-linalg regime: `--lxs 7 --workers 1 --blas-threads 128`.
 
 ---
 
-## 6. BLAS threading (the performance knob for this project)
+## 6. Workers vs. threads, and memory (read this — it's what wastes a node)
 
-`rand_isopeps` is SVD/QR/matmul-bound, so speed comes from **BLAS/OpenMP threads**, not GPUs.
-Every template exports the thread counts consistently:
-```bash
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
-```
-Two regimes:
-- **One big run:** give the whole node to one task (`-c 128`, threads = 128). Best for a
-  single large PEPS / long benchmark.
-- **A sweep:** run **many tasks with few threads each** (e.g. 8 tasks × 16 threads on one
-  node, or a job array under `-q shared`). Dense SVDs stop scaling well past ~16–32 threads,
-  so packing independent runs gives far more throughput than one 128-thread job. The
-  experiment scripts already expose the sweep axes (`--instances`, `--sketch-seeds`, `--seed`).
-- The package uses `threadpoolctl`, so it respects these env vars; keep them in sync.
+`rand_isopeps` experiments do **not** run as one big multi-threaded process. Each script
+spawns a **pool of worker processes** (`ProcessPoolExecutor`, one trial per worker) and
+**pins BLAS to a single thread inside each worker** (via `threadpoolctl`). Two *script* flags
+control this, and they matter more than any env var:
+
+- `--workers N` — number of independent trials in flight (worker processes).
+- `--blas-threads T` — BLAS/OpenMP threads **inside each worker** (default **1**).
+
+Because the scripts call `threadpool_limits(--blas-threads)` at runtime, they **override**
+`OMP_NUM_THREADS`/`MKL_NUM_THREADS`. So `export OMP_NUM_THREADS=128` does essentially nothing
+here — the real knob is `--blas-threads`, not the env var. (The templates still export the
+env vars as a floor for any stray library, but the script wins.)
+
+**The default worker count is laptop-conservative and will idle a NERSC node.** With
+`--workers 0` (the default) the resolver caps at **4** for the `column_sketch` suite
+([`auto_worker_count`](../src/rand_isopeps/experiment_utils/parallel.py)) and **12** for
+`real_moses_move` — regardless of core count. On a 128-core node that leaves 116+ cores idle.
+**You must pass `--workers` explicitly.**
+
+Two regimes — pick per job:
+
+| Regime | When | Flags |
+|---|---|---|
+| **Process-parallel** (default) | a sweep: many independent trials (Lx × states × seeds) | `--workers ~120 --blas-threads 1` |
+| **One big linalg** | a single large-Lx column, very few trials | `--workers 1 --blas-threads 128` |
+
+Dense SVDs stop scaling past ~16–32 threads, so for sweeps the many-1-thread-workers regime
+beats one fat 128-thread job. Reserve big-linalg for a single column so large its dense form
+dominates the node (§6.1).
+
+### 6.1 Memory & large Lx (the real reason for the node)
+
+The heavy jobs are the `column_sketch` sweeps (`exp08/09/10`): a dense column is materialized
+for scoring, and it grows as ~`16 · 2^Lx · 8^Lx` bytes.
+
+| Lx | dense column | + state prep |
+|---|---|---|
+| 6 | 0.27 GB | ~0.8 GB |
+| 7 | 4.3 GB | ~13 GB |
+| 8 | 69 GB | approaches the whole 512 GB node |
+
+At large Lx a **single trial** can eat tens of GB, so:
+
+- **`auto_worker_count` caps `--workers` by memory automatically**: `workers × (est bytes/trial)
+  ≤ 0.6 × node RAM`. This is what stops N workers each holding a big column from OOM-ing (it
+  caused a 108 GB crash locally — 4 workers × a ~27 GB trial). On the 512 GB node the ceiling
+  is higher, but at large Lx the cap may hand you far fewer than 120 workers. **That's correct
+  — don't force `--workers` past it.**
+- The scripts carry explicit guards: `exp08/09/10` take `--lxs` (which Lx to run);
+  `exp10_etaq_sweep` has a hard `--max-dense-gb` refusal (it is single-process — no `--workers`).
+
+**Rule of thumb:** as Lx climbs, *lower* `--workers` (or let the memory cap do it) and *raise*
+`--blas-threads`. At Lx=8, `--workers 1 --blas-threads 128`.
 
 ---
 
@@ -195,10 +248,10 @@ Grab a compute node interactively to iterate quickly (use the experiments' `--qu
 ```bash
 salloc -N 1 -C cpu -q interactive -t 1:00:00 -A mXXXX
 # …lands you on a CPU node…
-module load python && conda activate /global/common/software/mXXXX/rand-isopeps-env
-export OMP_NUM_THREADS=32
-python experiments/real_moses_move/scripts/exp01_real_moses_move.py --quick
+module load python && source activate /global/common/software/mXXXX/rand-isopeps-env
+python experiments/column_sketch/scripts/exp09_end_to_end_propagated_cost.py --quick --workers 16
 ```
+(`--quick` shrinks the sweep; still pass `--workers` — the default is 4.)
 
 ---
 
@@ -218,8 +271,15 @@ For an automated agent driving NERSC:
 - **Purge:** copy `outputs/` from `$PSCRATCH` to CFS as the last step of a run.
 - **Pick the QOS by size:** `-q debug` (≤30 min) for a fast smoke test, `-q regular` for a
   real run, `-q shared` for anything that doesn't need a whole node.
+- **Always set `--workers` on the experiment command** (default is 4–12 → idle node). Use
+  `--workers ~cores --blas-threads 1` for a sweep; `--workers 1 --blas-threads 128` for one
+  big-Lx column. Don't set both high — that oversubscribes (§6).
+- **On `OUT_OF_MEMORY`:** lower `--workers` and/or `--lxs` — a single large-Lx trial can be
+  tens of GB (§6.1). The script's `auto_worker_count` memory cap should prevent this, but a
+  forced `--workers` overrides it.
 - **Most common failures:** wrong account (CPU `m1234` vs GPU `m1234_g`); missing `-C cpu`;
-  forgot `srun`; env in `$HOME` instead of Common (quota/perf); results left on purged scratch.
+  forgot `srun`; forgot `--workers` (node idles); env in `$HOME` instead of Common
+  (quota/perf); results left on purged scratch.
 
 ---
 
@@ -230,7 +290,12 @@ For an automated agent driving NERSC:
 - GPU jobs charge to the `_g` account.
 - `$PSCRATCH` is purged and not backed up → stage results to CFS.
 - Compute nodes have **no internet** → install on login nodes.
-- `module load python` (conda) instead of `StdEnv/2023 … + venv`.
+- `module load python` (conda) instead of `StdEnv/2023 … + venv`; in a **batch** script
+  prefer `source activate <prefix>` (or source the conda hook) — bare `conda activate` can
+  fail in a non-interactive shell.
+- Parallelism is via **`--workers`/`--blas-threads` script flags**, not `OMP_NUM_THREADS`
+  (which the scripts override). Default workers = 4–12 → **pass `--workers`**.
+- Large Lx is **memory-bound**; worker count is auto-capped by RAM. Don't force it past the cap.
 - Confirm charge factors / QOS limits in Iris — they differ from Compute Canada.
 
 ---

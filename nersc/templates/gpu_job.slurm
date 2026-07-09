@@ -21,7 +21,7 @@
 #SBATCH --error=%x-%j.err
 
 module load python cudatoolkit
-conda activate /global/common/software/mXXXX/rand-isopeps-env   # ==EDIT==
+source activate /global/common/software/mXXXX/rand-isopeps-env   # ==EDIT== (source, not conda)
 
 cd "$PSCRATCH/randomized-isopeps"
 srun -n 1 -c 32 --cpu-bind=cores -G 4 --gpu-bind=none \

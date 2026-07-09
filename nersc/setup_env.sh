@@ -8,19 +8,20 @@
 #
 # Builds the conda env on the *Common* filesystem (fast parallel FS + big quota;
 # a torch/quimb env would blow your $HOME quota). Every job script then just does
-#     module load python && conda activate "$ENV_PREFIX"
+#     module load python && source activate "$ENV_PREFIX"
 set -euo pipefail
 
 PROJECT="${PROJECT:?set PROJECT to your NERSC project code, e.g. m1234}"
 ENV_PREFIX="/global/common/software/${PROJECT}/rand-isopeps-env"
 
 module load python                                    # NERSC's Anaconda base
+# Load conda's shell functions so `conda activate` works in this non-interactive script.
+source "$(conda info --base)/etc/profile.d/conda.sh"
 
 if [ ! -d "$ENV_PREFIX" ]; then
   conda create -y --prefix "$ENV_PREFIX" \
       python=3.11 pip numpy scipy matplotlib threadpoolctl
 fi
-# `conda activate` needs conda's shell hook; `module load python` sets it up.
 conda activate "$ENV_PREFIX"
 
 # Editable install of the package. The ".[quimb]" extra pulls quimb+autoray for the
@@ -30,4 +31,4 @@ pip install -e ".[quimb]"
 echo
 echo "=== env ready ==="
 echo "  prefix: $ENV_PREFIX"
-echo "  in job scripts:  module load python && conda activate $ENV_PREFIX"
+echo "  in job scripts:  module load python && source activate $ENV_PREFIX"

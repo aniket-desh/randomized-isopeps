@@ -8,18 +8,18 @@
 #SBATCH --constraint=cpu
 #SBATCH --qos=shared
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=16
 #SBATCH --time=00:30:00
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
 
 module load python
-conda activate /global/common/software/mXXXX/rand-isopeps-env   # ==EDIT==
+source activate /global/common/software/mXXXX/rand-isopeps-env   # ==EDIT== (source, not conda)
 
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1   # floor; script re-pins BLAS
 
+# --workers still needed even for a --quick run (default is 4). Keep it <= --cpus-per-task.
 cd "$PSCRATCH/randomized-isopeps"
 srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
-  python experiments/real_moses_move/scripts/exp01_real_moses_move.py --quick
+  python experiments/column_sketch/scripts/exp09_end_to_end_propagated_cost.py \
+    --quick --workers "$SLURM_CPUS_PER_TASK" --blas-threads 1
