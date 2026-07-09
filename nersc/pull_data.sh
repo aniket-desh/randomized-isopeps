@@ -14,7 +14,7 @@ set -euo pipefail
 
 NERSC_USER="${NERSC_USER:-aniketd}"
 REMOTE_HOST="${REMOTE_HOST:-perlmutter.nersc.gov}"
-# ==EDIT== the project code (m4926). Where your jobs stage outputs on CFS:
+# Where jobs stage outputs on CFS (matches the templates CFS_OUT):
 REMOTE_DATA="${REMOTE_DATA:-/global/cfs/cdirs/m4926/risopeps/outputs/}"
 LOCAL_DEST="${LOCAL_DEST:-./nersc-data/}"          # gitignored (see .gitignore)
 MAX_GB="${MAX_GB:-1}"

@@ -5,8 +5,7 @@
 #     sbatch nersc/templates/array_sweep.slurm
 #
 #SBATCH --job-name=risopeps-batch
-#SBATCH --account=m4926               # ==EDIT==
-#SBATCH --constraint=cpu
+#SBATCH --account=m4926#SBATCH --constraint=cpu
 #SBATCH --qos=shared                  # partial node, charged fractionally; do NOT set --nodes
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32            # cores per array task (shared gives ~4 GB/core -> ~128 GB)
@@ -18,7 +17,7 @@
 #SBATCH --mail-user=aniket4@illinois.edu   # job start/fail emails
 
 module load python
-source activate /global/common/software/m4926/rand-isopeps-env   # ==EDIT== (source, not conda)
+source activate /global/common/software/m4926/rand-isopeps-env   # source (not conda): batch-safe
 
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1   # floor; script re-pins BLAS
 
@@ -42,5 +41,4 @@ srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores python $CMD
 
 # Tasks share one timestamped outputs/ tree (unique slugs, no collisions). Stage to CFS so
 # nersc/pull_data.sh can fetch it; -u = only copy newer, cheap when tasks overlap.
-CFS_OUT="/global/cfs/cdirs/m4926/risopeps/outputs"        # ==EDIT== project code
-mkdir -p "$CFS_OUT" && cp -ru outputs/. "$CFS_OUT"/ 2>/dev/null || true
+CFS_OUT="/global/cfs/cdirs/m4926/risopeps/outputs"        # keepers survive the scratch purgemkdir -p "$CFS_OUT" && cp -ru outputs/. "$CFS_OUT"/ 2>/dev/null || true

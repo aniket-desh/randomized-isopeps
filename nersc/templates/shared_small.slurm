@@ -4,8 +4,7 @@
 #     sbatch nersc/templates/shared_small.slurm
 #
 #SBATCH --job-name=risopeps-quick
-#SBATCH --account=m4926               # ==EDIT==
-#SBATCH --constraint=cpu
+#SBATCH --account=m4926#SBATCH --constraint=cpu
 #SBATCH --qos=shared
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
@@ -14,7 +13,7 @@
 #SBATCH --error=%x-%j.err
 
 module load python
-source activate /global/common/software/m4926/rand-isopeps-env   # ==EDIT== (source, not conda)
+source activate /global/common/software/m4926/rand-isopeps-env   # source (not conda): batch-safe
 
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1   # floor; script re-pins BLAS
 
