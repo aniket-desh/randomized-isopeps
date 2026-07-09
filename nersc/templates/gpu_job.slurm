@@ -9,7 +9,7 @@
 #   * constraint is gpu, and you must explicitly request GPUs
 #
 #SBATCH --job-name=risopeps-gpu
-#SBATCH --account=mXXXX_g             # ==EDIT== GPU jobs charge to the _g allocation
+#SBATCH --account=m4926_g             # ==EDIT== GPU jobs charge to the _g allocation
 #SBATCH --constraint=gpu              # Perlmutter GPU node: 1x EPYC (64c) + 4x A100
 #SBATCH --qos=regular
 #SBATCH --nodes=1
@@ -21,7 +21,7 @@
 #SBATCH --error=%x-%j.err
 
 module load python cudatoolkit
-source activate /global/common/software/mXXXX/rand-isopeps-env   # ==EDIT== (source, not conda)
+source activate /global/common/software/m4926/rand-isopeps-env   # ==EDIT== (source, not conda)
 
 cd "$PSCRATCH/randomized-isopeps"
 srun -n 1 -c 32 --cpu-bind=cores -G 4 --gpu-bind=none \

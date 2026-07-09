@@ -5,7 +5,7 @@
 #     sbatch nersc/templates/array_sweep.slurm
 #
 #SBATCH --job-name=risopeps-batch
-#SBATCH --account=mXXXX               # ==EDIT==
+#SBATCH --account=m4926               # ==EDIT==
 #SBATCH --constraint=cpu
 #SBATCH --qos=shared                  # partial node, charged fractionally; do NOT set --nodes
 #SBATCH --ntasks=1
@@ -18,7 +18,7 @@
 #SBATCH --mail-user=you@lbl.gov       # ==EDIT==
 
 module load python
-source activate /global/common/software/mXXXX/rand-isopeps-env   # ==EDIT== (source, not conda)
+source activate /global/common/software/m4926/rand-isopeps-env   # ==EDIT== (source, not conda)
 
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1   # floor; script re-pins BLAS
 
@@ -42,5 +42,5 @@ srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores python $CMD
 
 # Tasks share one timestamped outputs/ tree (unique slugs, no collisions). Stage to CFS so
 # nersc/pull_data.sh can fetch it; -u = only copy newer, cheap when tasks overlap.
-CFS_OUT="/global/cfs/cdirs/mXXXX/risopeps/outputs"        # ==EDIT== project code
+CFS_OUT="/global/cfs/cdirs/m4926/risopeps/outputs"        # ==EDIT== project code
 mkdir -p "$CFS_OUT" && cp -ru outputs/. "$CFS_OUT"/ 2>/dev/null || true

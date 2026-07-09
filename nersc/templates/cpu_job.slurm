@@ -3,7 +3,7 @@
 # Edit the ==EDIT== lines, then:  sbatch nersc/templates/cpu_job.slurm
 #
 #SBATCH --job-name=risopeps
-#SBATCH --account=mXXXX               # ==EDIT== your NERSC CPU project (no _g for CPU jobs)
+#SBATCH --account=m4926               # ==EDIT== your NERSC CPU project (no _g for CPU jobs)
 #SBATCH --constraint=cpu              # CPU node: 2x AMD EPYC 7763 = 128 cores, 512 GB
 #SBATCH --qos=regular                 # regular | debug (<=30 min) | shared (partial node)
 #SBATCH --nodes=1
@@ -18,7 +18,7 @@
 module load python
 # Use `source activate` (not `conda activate`) in a batch shell -- the bare form can raise
 # CommandNotFoundError in a non-interactive job.
-source activate /global/common/software/mXXXX/rand-isopeps-env   # ==EDIT== env prefix
+source activate /global/common/software/m4926/rand-isopeps-env   # ==EDIT== env prefix
 
 # These are only a floor: each worker re-pins BLAS to --blas-threads via threadpoolctl, so
 # the script's flags below are what actually decide threading. Kept for stray libraries.
@@ -44,5 +44,5 @@ srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
 # Stage results to CFS: scratch is PURGED and not backed up. Scripts write everything under
 # a single top-level outputs/ tree (outputs/<suite>/{data,figures}). This is what
 # nersc/pull_data.sh rsyncs back to your Mac.
-CFS_OUT="/global/cfs/cdirs/mXXXX/risopeps/outputs"        # ==EDIT== project code
+CFS_OUT="/global/cfs/cdirs/m4926/risopeps/outputs"        # ==EDIT== project code
 mkdir -p "$CFS_OUT" && cp -ru outputs/. "$CFS_OUT"/ 2>/dev/null || true

@@ -19,7 +19,7 @@ copy-paste, and §9 is an agent operating guide.
 ```bash
 ssh aniketd@perlmutter.nersc.gov           # login (MFA: password+OTP)
 cd $HOME && git clone https://github.com/aniket-desh/randomized-isopeps && cd randomized-isopeps
-PROJECT=mXXXX bash nersc/setup_env.sh      # one-time: build the conda env on the Common FS
+PROJECT=m4926 bash nersc/setup_env.sh      # one-time: build the conda env on the Common FS
 # edit nersc/templates/cpu_job.slurm (set --account, the conda prefix, the experiment line)
 sbatch nersc/templates/cpu_job.slurm       # submit a CPU job
 squeue --me                                # watch it
@@ -56,6 +56,12 @@ pull/push`) run on a login node; the job only runs and stages results.
   ```bash
   sacctmgr -p show assoc user=$USER format=account,qos
   ```
+- **Your allocation** (project `m4926` = *farqu*, user `aniketd`, PI Van Beeumen; *as of
+  2026-07-09*): your personal caps are ~**450 CPU** node-hrs (`-A m4926`) and ~**1,799 GPU**
+  node-hrs (`-A m4926_g`) — a 10% slice of the shared project pool (~4,500 CPU / ~18,000 GPU).
+  Charge factor is **1.0**, so node-hours = walltime × nodes × QOS-factor. Allocation releases
+  **quarterly** (10/20/30/40%) and unused *released* hours expire — watch "Hours at risk" in
+  Iris. CFS is `/global/cfs/cdirs/m4926` (20 TB). The GPU pool is unused (CPU-only stack today).
 
 ---
 
@@ -83,7 +89,7 @@ Compute nodes have **no outbound internet**, so all `pip`/`conda` installs happe
 node. That's exactly what [`setup_env.sh`](setup_env.sh) does:
 
 ```bash
-PROJECT=mXXXX bash nersc/setup_env.sh
+PROJECT=m4926 bash nersc/setup_env.sh
 ```
 
 which is, in essence:
@@ -234,7 +240,7 @@ squeue --me
 tail -f risopeps-12345.out
 
 # 4. keep the results (scratch is purged!)
-cp -r outputs /global/cfs/cdirs/mXXXX/risopeps/
+cp -r outputs /global/cfs/cdirs/m4926/risopeps/
 ```
 
 **Chaining stages** (if one depends on another), the NERSC equivalent of the Trillium
@@ -250,9 +256,9 @@ sbatch --dependency=afterok:$jid stage_b.slurm
 
 Grab a compute node interactively to iterate quickly (use the experiments' `--quick` flags):
 ```bash
-salloc -N 1 -C cpu -q interactive -t 1:00:00 -A mXXXX
+salloc -N 1 -C cpu -q interactive -t 1:00:00 -A m4926
 # …lands you on a CPU node…
-module load python && source activate /global/common/software/mXXXX/rand-isopeps-env
+module load python && source activate /global/common/software/m4926/rand-isopeps-env
 python experiments/column_sketch/scripts/exp09_end_to_end_propagated_cost.py --quick --workers 16
 ```
 (`--quick` shrinks the sweep; still pass `--workers` — the default is 4.)

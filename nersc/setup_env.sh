@@ -4,7 +4,7 @@
 # RUN ON A LOGIN NODE (compute nodes have no outbound internet, so pip/conda must
 # happen here). From the repo root:
 #
-#     PROJECT=mXXXX bash nersc/setup_env.sh
+#     PROJECT=m4926 bash nersc/setup_env.sh
 #
 # Builds the conda env on the *Common* filesystem (fast parallel FS + big quota;
 # a torch/quimb env would blow your $HOME quota). Every job script then just does
