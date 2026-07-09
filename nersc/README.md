@@ -146,6 +146,11 @@ experiment, then `sbatch`.
 | [`shared_small.slurm`](templates/shared_small.slurm) | a quick / small run without burning a full node | `-q shared -c 16` |
 | [`gpu_job.slurm`](templates/gpu_job.slurm) | **reference only** — if you ever add a torch/cupy backend | `-C gpu -A …_g --gpus-per-node=4` |
 
+Ready-to-submit runs for the planned studies live in [`jobs/`](jobs/): `ham_sweep.slurm`
+(the Hamiltonian survey array — TFIM ladder / heis / xxz / compass, one task per
+instrument × state, with the parallel per-cut disentanglers) and `lx_ceiling.slurm`
+(full-node Lx = 6 → 7 → 8 staging via `STAGE=`). Both are `m4926`-filled; just `sbatch`.
+
 Example experiment line — the current frontier is the `column_sketch` end-to-end cost sweep,
 which is process-parallel (**pass `--workers`**; §6):
 ```bash

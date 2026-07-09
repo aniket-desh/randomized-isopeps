@@ -115,10 +115,10 @@ def _prepare_state(args, kind, lx, seed, eta):
     from rand_isopeps.real_isotns.moses_move import random_isotns
     psi = random_isotns(lx, args.ly, bond=args.bond, phys=args.phys, chi=args.chi,
                         eta=eta, cutoff=args.cutoff, Ndis=args.ndis, seed=seed)
-    if kind.startswith("tfim@"):
-        from rand_isopeps.real_isotns.tebd2 import imaginary_time, tfi_ham
-        g = float(kind.split("@")[1])
-        psi, _ = imaginary_time(psi, tfi_ham(lx, args.ly, g=g), taus=args.taus, steps=None,
+    from rand_isopeps.real_isotns.tebd2 import ham_from_spec, imaginary_time
+    ham = ham_from_spec(kind, lx, args.ly)
+    if ham is not None:
+        psi, _ = imaginary_time(psi, ham, taus=args.taus, steps=None,
                                 chi=args.chi, eta=eta, cutoff=args.cutoff, Ndis=args.ndis)
     return psi
 
@@ -395,7 +395,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--lxs", type=int, nargs="+", default=[3, 4, 5])
     parser.add_argument("--ly", type=int, default=4)
-    parser.add_argument("--states", nargs="+", default=["random", "tfim@3.5", "tfim@3.04"])
+    parser.add_argument("--states", nargs="+", default=["random", "tfim@3.5", "tfim@3.04"],
+                        help="state specs: random | tfim@G | heis | xxz@D | compass")
     parser.add_argument("--bond", type=int, default=3)
     parser.add_argument("--phys", type=int, default=2)
     parser.add_argument("--chi", type=int, default=8)

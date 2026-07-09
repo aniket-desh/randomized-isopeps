@@ -124,3 +124,23 @@ def test_larger_kappa_reaches_deeper():
     n2 = sum(1 for cm in mechanism_profile(y, op.output_dims, 2, 2, (2,), ndis=6,
                                            rng=np.random.default_rng(6)) if cm.disentangled)
     assert n2 >= 1
+
+
+def test_parallel_cuts_bit_identical():
+    # cut_workers only changes the execution schedule, never the numbers: per-cut RNG
+    # streams are spawned up front and each altmin acts on a copy of its cut's carrier.
+    op = _op(seed=5)
+    c = op.materialize()
+    y, _ = sketch_range(op, ell=10, chi_sk=8, n_power=1,
+                        rng=np.random.default_rng(6), reference=c)
+    kw = dict(ndis=6, null_draws=4)
+    serial = mechanism_profile(y, op.output_dims, 2, 2, (2, 4),
+                               rng=np.random.default_rng(7), cut_workers=1, **kw)
+    threaded = mechanism_profile(y, op.output_dims, 2, 2, (2, 4),
+                                 rng=np.random.default_rng(7), cut_workers=4, **kw)
+    assert len(serial) == len(threaded)
+    for a, b in zip(serial, threaded):
+        assert a.cut == b.cut and a.disentangled == b.disentangled
+        assert a.dis_tail == b.dis_tail            # bit-identical, not approx
+        assert a.null_mean == b.null_mean and a.null_std == b.null_std
+        assert a.dis_iters == b.dis_iters

@@ -97,10 +97,10 @@ def _prepare_state(args, kind, lx, seed, eta):
     from rand_isopeps.real_isotns.moses_move import random_isotns
     psi = random_isotns(lx, args.ly, bond=args.bond, phys=args.phys, chi=args.chi,
                         eta=eta, cutoff=args.cutoff, Ndis=args.ndis, seed=seed)
-    if kind.startswith("tfim@"):
-        from rand_isopeps.real_isotns.tebd2 import imaginary_time, tfi_ham
-        g = float(kind.split("@")[1])
-        psi, _ = imaginary_time(psi, tfi_ham(lx, args.ly, g=g), taus=args.taus, steps=None,
+    from rand_isopeps.real_isotns.tebd2 import ham_from_spec, imaginary_time
+    ham = ham_from_spec(kind, lx, args.ly)
+    if ham is not None:
+        psi, _ = imaginary_time(psi, ham, taus=args.taus, steps=None,
                                 chi=args.chi, eta=eta, cutoff=args.cutoff, Ndis=args.ndis)
     return psi
 
@@ -200,13 +200,15 @@ def _run_trial(task):
                             rng=rng, reference=c)
         y_norm = float(np.linalg.norm(y))
         prof = mechanism_profile(y, op.output_dims, eta, args.kappa, (eta, 6, 8),
-                                 ndis=args.ndis, rng=np.random.default_rng(args.seed + 3))
+                                 ndis=args.ndis, rng=np.random.default_rng(args.seed + 3),
+                                 cut_workers=args.cut_workers)
         summ = summarize(prof, y_norm)
         # frontier: residual loss vs Ndis (kappa fixed) and vs kappa (Ndis fixed)
         frontier = {}
         for nd in args.ndis_scan:
             pf = mechanism_profile(y, op.output_dims, eta, args.kappa, (eta,), ndis=nd,
-                                   rng=np.random.default_rng(args.seed + 3))
+                                   rng=np.random.default_rng(args.seed + 3),
+                                   cut_workers=args.cut_workers)
             frontier[f"resloss_ndis_{nd}"] = summarize(pf, y_norm).tau_dis
             frontier[f"disflops_ndis_{nd}"] = disentangler_flops(op.output_dims, ell, eta,
                                                                  args.kappa, nd)
@@ -457,13 +459,17 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--lxs", type=int, nargs="+", default=[3, 4, 5])
     parser.add_argument("--ly", type=int, default=4)
-    parser.add_argument("--states", nargs="+", default=["random", "tfim@3.5", "tfim@3.04"])
+    parser.add_argument("--states", nargs="+", default=["random", "tfim@3.5", "tfim@3.04"],
+                        help="state specs: random | tfim@G | heis | xxz@D | compass")
     parser.add_argument("--bond", type=int, default=3)
     parser.add_argument("--phys", type=int, default=2)
     parser.add_argument("--chi", type=int, default=8)
     parser.add_argument("--eta", type=int, default=4, help="fixed vertical bond for the disentangled column")
     parser.add_argument("--kappa", type=int, default=2, help="disentangler horizontal freedom")
     parser.add_argument("--ndis-scan", type=int, nargs="+", default=[0, 1, 3, 5, 10])
+    parser.add_argument("--cut-workers", type=int, default=1,
+                        help="threads for the independent per-cut disentanglers (results are "
+                             "bit-identical at any value; keep workers*cut_workers <= cores)")
     parser.add_argument("--chi-sks", type=int, nargs="+", default=[4, 8])
     parser.add_argument("--n-powers", type=int, nargs="+", default=[0, 1])
     parser.add_argument("--match-tol", type=float, default=0.05)

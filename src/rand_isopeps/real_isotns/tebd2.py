@@ -34,6 +34,61 @@ def tfi_ham(Lx: int, Ly: int, j: float = 1.0, g: float = 3.0) -> LocalHam2D:
     return LocalHam2D(Lx, Ly, H2=-j * (qu.pauli("Z") & qu.pauli("Z")), H1=-g * qu.pauli("X"))
 
 
+def heis_ham(Lx: int, Ly: int, j: float = 1.0) -> LocalHam2D:
+    """2D antiferromagnetic Heisenberg (Pauli convention, eq. 35 of Dektor et al.):
+    H = j sum_<ab> (X_a X_b + Y_a Y_b + Z_a Z_b)."""
+    return LocalHam2D(Lx, Ly, H2=j * ((qu.pauli("X") & qu.pauli("X"))
+                                      + (qu.pauli("Y") & qu.pauli("Y"))
+                                      + (qu.pauli("Z") & qu.pauli("Z"))))
+
+
+def xxz_ham(Lx: int, Ly: int, delta: float = 1.0, j: float = 1.0) -> LocalHam2D:
+    """2D XXZ: H = j sum_<ab> (X_a X_b + Y_a Y_b + delta Z_a Z_b). delta=1 is Heisenberg;
+    delta interpolates the entanglement 'hardness' dial (XY-like -> Ising-like)."""
+    return LocalHam2D(Lx, Ly, H2=j * ((qu.pauli("X") & qu.pauli("X"))
+                                      + (qu.pauli("Y") & qu.pauli("Y"))
+                                      + delta * (qu.pauli("Z") & qu.pauli("Z"))))
+
+
+def compass_ham(Lx: int, Ly: int, j: float = 1.0) -> LocalHam2D:
+    """Square-lattice quantum compass model (the Kitaev-honeycomb analog on our lattice):
+    -j X_a X_b on horizontal bonds, -j Y_a Y_b on vertical bonds. Frustrated by bond-
+    direction-dependent couplings -- the 'hard' end of the survey ladder."""
+    XX, YY = -j * (qu.pauli("X") & qu.pauli("X")), -j * (qu.pauli("Y") & qu.pauli("Y"))
+    H2 = {}
+    for i in range(Lx):
+        for k in range(Ly):
+            if k + 1 < Ly:
+                H2[((i, k), (i, k + 1))] = XX      # horizontal (along a row)
+            if i + 1 < Lx:
+                H2[((i, k), (i + 1, k))] = YY      # vertical (along a column)
+    return LocalHam2D(Lx, Ly, H2=H2)
+
+
+def ham_from_spec(spec: str, Lx: int, Ly: int) -> LocalHam2D | None:
+    """Build the Hamiltonian named by an experiment state spec; ``None`` for 'random'.
+
+    Grammar (the ``--states`` vocabulary shared by the column_sketch experiments):
+      ``random``    -- no Hamiltonian (skip imaginary time; the random isoTNS itself)
+      ``tfim@G``    -- transverse-field Ising at field g=G (g_c ~ 3.044)
+      ``heis``      -- antiferromagnetic Heisenberg
+      ``xxz@D``     -- XXZ at anisotropy delta=D
+      ``compass``   -- square-lattice compass (Kitaev analog)
+    """
+    if spec == "random":
+        return None
+    kind, _, arg = spec.partition("@")
+    if kind == "tfim":
+        return tfi_ham(Lx, Ly, g=float(arg))
+    if kind == "heis":
+        return heis_ham(Lx, Ly)
+    if kind == "xxz":
+        return xxz_ham(Lx, Ly, delta=float(arg))
+    if kind == "compass":
+        return compass_ham(Lx, Ly)
+    raise ValueError(f"unknown state spec {spec!r} (want random | tfim@G | heis | xxz@D | compass)")
+
+
 def _gates(ham: LocalHam2D, tau: float) -> dict:
     """imaginary-time two-site gates exp(-tau * H_bond), reshaped for gate_."""
     d = ham.terms[next(iter(ham.terms))].shape[0]

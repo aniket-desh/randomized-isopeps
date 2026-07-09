@@ -142,6 +142,7 @@ def mechanism_profile(
     ndis: int,
     rng: np.random.Generator,
     null_draws: int = 8,
+    cut_workers: int = 1,
 ) -> list[CutMechanism]:
     """Walk the exact left-canonical cuts of the sampled range ``Y`` and, at each
     internal vertical cut, measure the three tails of the mechanism test.
@@ -149,12 +150,22 @@ def mechanism_profile(
     The sweep is *exact* (no truncation of the propagated carrier) so every cut sees
     the intrinsic spectrum of ``Y``; the disentangler is then applied to the top-
     ``rho = eta*kappa`` carrier of that cut. Returns one :class:`CutMechanism` per
-    internal cut ``i = 0 .. Lx-2`` (the last output leg has no next leg to regroup)."""
+    internal cut ``i = 0 .. Lx-2`` (the last output leg has no next leg to regroup).
+
+    ``cut_workers > 1`` runs the per-cut disentangler optimizations in a thread pool:
+    each ``disentangle_altmin`` acts on a *copy* of its cut's carrier and nothing feeds
+    forward (the carry is the exact untruncated spectrum), so the cuts are independent
+    given the sequential SVD chain. Per-cut RNG streams are spawned up front, so the
+    result is bit-identical at any ``cut_workers`` (BLAS releases the GIL; pair with
+    ``--blas-threads 1``)."""
     lx = len(out_dims)
     ell = y.shape[1]
     work = y.reshape(*out_dims, ell)
     left = 1
-    profile: list[CutMechanism] = []
+    child_rngs = rng.spawn(max(lx - 1, 1))
+
+    # phase 1 -- the sequential exact SVD chain: collect every cut's carrier + tails.
+    jobs: list[dict] = []
     for i in range(lx - 1):
         o = out_dims[i]
         mat = work.reshape(left * o, -1)          # M_i : (a, b)
@@ -167,29 +178,40 @@ def mechanism_profile(
         o_next = int(out_dims[i + 1])
         vtilde = sv[:rho, None] * vh[:rho, :]     # top-rho carrier: (rho, b)
         can = (rho == eta * kappa) and (b % o_next == 0) and (b // o_next >= 1) and (a >= rho)
-
         engaged = bool(can and kappa > 1 and ndis >= 1)
-        if engaged:
-            n3 = b // o_next
-            dims = _CutDims(eta=eta, chi=kappa, n2=o_next, n3=n3)
-            res = disentangle_altmin(vtilde, dims, k=eta, maxiter=int(ndis), rng=rng)
-            dis_tail, dis_iters = res.tail_final, res.iters
-            null_mean, null_std = _null_gauge_tail_std(vtilde, eta, null_draws, rng)
-        else:
-            dis_tail, dis_iters = tail_eta, 0     # ndis=0 or no room: identity disentangler
-            null_mean, null_std = tail_energy(sv[:rho], eta), 0.0
 
-        comp_tail = tail_energy(sv, rho)
-        profile.append(CutMechanism(
-            cut=i, rows=a, cols=b, kappa=kappa, rho=rho, disentangled=engaged,
-            tail_eta_I=tail_eta, tail_etaq_I=tail_qs, comp_tail=comp_tail,
-            dis_tail=dis_tail, dis_total=comp_tail + dis_tail, dis_iters=dis_iters,
-            null_mean=null_mean, null_std=null_std,
-        ))
+        jobs.append(dict(cut=i, a=a, b=b, rho=rho, o_next=o_next, engaged=engaged,
+                         vtilde=vtilde, tail_eta=tail_eta, tail_qs=tail_qs,
+                         comp_tail=tail_energy(sv, rho),
+                         fallback_null=tail_energy(sv[:rho], eta)))
         # exact left-canonical carry upward (no truncation): full spectrum propagates
         work = (sv[:, None] * vh)
         left = sv.shape[0]
-    return profile
+
+    # phase 2 -- the independent per-cut disentangler optimizations (parallelizable).
+    def _run_cut(job: dict) -> CutMechanism:
+        gen = child_rngs[job["cut"]]
+        if job["engaged"]:
+            dims = _CutDims(eta=eta, chi=kappa, n2=job["o_next"], n3=job["b"] // job["o_next"])
+            res = disentangle_altmin(job["vtilde"], dims, k=eta, maxiter=int(ndis), rng=gen)
+            dis_tail, dis_iters = res.tail_final, res.iters
+            null_mean, null_std = _null_gauge_tail_std(job["vtilde"], eta, null_draws, gen)
+        else:
+            dis_tail, dis_iters = job["tail_eta"], 0   # ndis=0 or no room: identity disentangler
+            null_mean, null_std = job["fallback_null"], 0.0
+        return CutMechanism(
+            cut=job["cut"], rows=job["a"], cols=job["b"], kappa=kappa, rho=job["rho"],
+            disentangled=job["engaged"], tail_eta_I=job["tail_eta"], tail_etaq_I=job["tail_qs"],
+            comp_tail=job["comp_tail"], dis_tail=dis_tail,
+            dis_total=job["comp_tail"] + dis_tail, dis_iters=dis_iters,
+            null_mean=null_mean, null_std=null_std,
+        )
+
+    if cut_workers > 1 and len(jobs) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=int(cut_workers)) as pool:
+            return list(pool.map(_run_cut, jobs))
+    return [_run_cut(job) for job in jobs]
 
 
 @dataclass
@@ -302,6 +324,7 @@ def disentangled_column_qr(
     ndis: int = 10,
     rng: np.random.Generator | None = None,
     reference: np.ndarray | None = None,
+    cut_workers: int = 1,
 ) -> DisentangledColumnResult:
     """Disentangled-global column accuracy, rigorously **bracketed** (no fragile build).
 
@@ -338,7 +361,8 @@ def disentangled_column_qr(
     y, _ = sketch_range(column, ell=max(ell, eta_eq + 2), chi_sk=chi_sk, n_power=n_power,
                         rng=gen, reference=c)
     prof = mechanism_profile(y, column.output_dims, int(eta), int(kappa), (int(eta),),
-                             ndis=int(ndis), rng=np.random.default_rng(int(gen.integers(1 << 30))))
+                             ndis=int(ndis), rng=np.random.default_rng(int(gen.integers(1 << 30))),
+                             cut_workers=int(cut_workers))
     resid_loss = summarize(prof, float(np.linalg.norm(y))).tau_dis
 
     return DisentangledColumnResult(
