@@ -40,5 +40,7 @@ cd "$PSCRATCH/randomized-isopeps"
 echo "[array $SLURM_ARRAY_TASK_ID] python $CMD"
 srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores python $CMD
 
-# Each task writes its own timestamped outputs/; copy them to CFS after the array finishes.
-# cp -r outputs /global/cfs/cdirs/mXXXX/risopeps/
+# Tasks share one timestamped outputs/ tree (unique slugs, no collisions). Stage to CFS so
+# nersc/pull_data.sh can fetch it; -u = only copy newer, cheap when tasks overlap.
+CFS_OUT="/global/cfs/cdirs/mXXXX/risopeps/outputs"        # ==EDIT== project code
+mkdir -p "$CFS_OUT" && cp -ru outputs/. "$CFS_OUT"/ 2>/dev/null || true

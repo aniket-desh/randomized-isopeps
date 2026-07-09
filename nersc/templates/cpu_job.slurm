@@ -41,5 +41,8 @@ srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
     --lxs 3 4 5 --states random tfim@3.5 tfim@3.04 \
     --workers "$WORKERS" --blas-threads "$BLAS_THREADS"   # ==EDIT== experiment + args
 
-# Keep results: scratch is PURGED and not backed up.
-# cp -r outputs /global/cfs/cdirs/mXXXX/risopeps/
+# Stage results to CFS: scratch is PURGED and not backed up. Scripts write everything under
+# a single top-level outputs/ tree (outputs/<suite>/{data,figures}). This is what
+# nersc/pull_data.sh rsyncs back to your Mac.
+CFS_OUT="/global/cfs/cdirs/mXXXX/risopeps/outputs"        # ==EDIT== project code
+mkdir -p "$CFS_OUT" && cp -ru outputs/. "$CFS_OUT"/ 2>/dev/null || true

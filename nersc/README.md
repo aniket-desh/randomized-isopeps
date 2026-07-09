@@ -17,13 +17,17 @@ copy-paste, and §9 is an agent operating guide.
 ## 0. TL;DR
 
 ```bash
-ssh <user>@perlmutter.nersc.gov            # login (MFA: password+OTP)
+ssh aniketd@perlmutter.nersc.gov           # login (MFA: password+OTP)
 cd $HOME && git clone https://github.com/aniket-desh/randomized-isopeps && cd randomized-isopeps
 PROJECT=mXXXX bash nersc/setup_env.sh      # one-time: build the conda env on the Common FS
 # edit nersc/templates/cpu_job.slurm (set --account, the conda prefix, the experiment line)
 sbatch nersc/templates/cpu_job.slurm       # submit a CPU job
 squeue --me                                # watch it
 ```
+
+**Repeatable loop** (deploy code → run → publish figures → pull data → re-plot locally) is
+scripted in `nersc/{deploy,publish,pull_data}.sh` — see **§11**. Network steps (`git
+pull/push`) run on a login node; the job only runs and stages results.
 
 - This project runs **CPU jobs** (`-C cpu`), not GPU. It's dominated by dense/randomized
   SVDs, QRs and matmuls.
@@ -297,6 +301,51 @@ For an automated agent driving NERSC:
   (which the scripts override). Default workers = 4–12 → **pass `--workers`**.
 - Large Lx is **memory-bound**; worker count is auto-capped by RAM. Don't force it past the cap.
 - Confirm charge factors / QOS limits in Iris — they differ from Compute Canada.
+
+---
+
+## 11. The git round-trip: deploy → run → publish → pull
+
+The whole loop is git-based, with one hard rule: **`git pull`/`git push` happen on a login
+node, never inside a job** (compute nodes have no internet — a job that tries to push just
+hangs). So the network steps bracket the `sbatch`, they aren't part of it. Three helper
+scripts (`nersc/*.sh`) wrap it:
+
+```
+  local (Mac)          NERSC login node                    NERSC compute node
+  ───────────          ────────────────                    ──────────────────
+  edit + git push  ─▶  bash nersc/deploy.sh [branch]   (git pull, reinstall if deps moved)
+                       sbatch nersc/templates/…     ─▶  job runs, writes outputs/,
+                                                        stages them to CFS
+                   ◀─  bash nersc/publish.sh          (figures → 'results' branch)
+  git fetch results
+  git checkout origin/results -- .   (view PDFs; or just browse them on GitHub)
+  bash nersc/pull_data.sh  ◀────────────────────────  raw CSVs on CFS (rsync, ≤1 GB guard)
+  re-plot locally
+  └──────────────────────────────── repeat ──────────────────────────────────┘
+```
+
+- **`nersc/deploy.sh [branch]`** *(login node)* — clones into `$PSCRATCH/randomized-isopeps`
+  if missing (e.g. after a scratch purge), else fast-forwards; reinstalls only if
+  `pyproject.toml` changed. Override the location with `RISOPEPS_DIR`.
+- **`nersc/publish.sh ["msg"]`** *(login node, after the job)* — regenerates the curated
+  figures (`curate_figures.py`) and pushes **only `reports/figures/`** to a `results` branch
+  (a separate worktree, so your run checkout is untouched). **Figures only — no data in git.**
+- **`nersc/pull_data.sh`** *(local)* — rsyncs the raw `outputs/` CSVs from CFS to `./nersc-data/`
+  (gitignored) so you can re-configure plots on your Mac. Refuses a pull over `MAX_GB` (default
+  **1 GB**) unless `FORCE=1` — narrow `REMOTE_DATA` or plot on NERSC for anything bigger.
+
+**Two setup notes:**
+- **Login-node push needs cached credentials.** The repo is public, but *pushing* the
+  `results` branch needs auth on Perlmutter. Easiest: use an SSH remote
+  (`git remote set-url origin git@github.com:aniket-desh/randomized-isopeps`) with an SSH key
+  on NERSC, or a GitHub PAT via `git config --global credential.helper store` + one manual push.
+- **Staging to CFS is what makes `pull_data.sh` work.** The templates end with a
+  `cp -ru outputs/. $CFS_OUT/` line — set `$CFS_OUT` (and `pull_data.sh`'s `REMOTE_DATA`) to
+  the same `/global/cfs/cdirs/<project>/risopeps/outputs` path.
+
+Since there's no agent on NERSC, the split is deliberate: the node only **runs and stages**;
+all plotting/analysis happens locally from the pulled data.
 
 ---
 
