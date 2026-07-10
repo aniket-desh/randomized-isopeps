@@ -68,7 +68,7 @@ $\eta\kappa$ subspace *can* be reorganized into a thin $\eta = 4$ bond (best cas
 
 | state | phase | $L_x{=}4$ | $L_x{=}5$ | $L_x{=}6$ | verdict |
 |---|---|:---:|:---:|:---:|---|
-| TFIM $g{=}3.5$ | paramagnet | ✅ 0.19 | ✅ 0.39 | ✅ 0.62 | **wins through $L_x{=}6$** |
+| TFIM $g{=}3.5$ | paramagnet | ✅ 0.19 | ✅ 0.39 | ✅ 0.62 | **wins 4–6, break-even at $L_x{=}7$** (§3b) |
 | TFIM $g{=}2.0$ | ordered | ✅ 0.44 | ✅ 0.88 | ✅ 0.85 | **wins through $L_x{=}6$** |
 | TFIM $g{=}1.0$ | deep ordered | ✅ 0.05 | ✅ 0.25 | ✅ 0.20 | **wins through $L_x{=}6$** (rank-1, near-product) |
 | TFIM $g{=}3.04$ | **critical** | ✅ 0.24 | ✅ 0.50 | ❌ 1.10 | crosses over at $L_x{=}6$ |
@@ -111,6 +111,25 @@ $\mathrm{rank} \le 2$ always wins; $\mathrm{rank} \ge 4.5$ always loses; $\mathr
 the boundary (TFIM $g{=}3.5$ wins on a steeper tail, compass loses on a flatter/frustrated one). So
 the accuracy ladder and the spectrum ladder are the same ladder.
 
+### 3b. $L_x = 7$ — the $\eta = 4$ hold is finite (first beyond-Mac point)
+
+The $L_x = 7$ ceiling (full node, heis / tfim@3.04 / tfim@3.5) adds the crucial scaling point:
+
+| state | $L_x{=}4$ | $L_x{=}5$ | $L_x{=}6$ | $L_x{=}7$ |
+|---|:---:|:---:|:---:|:---:|
+| TFIM $g{=}3.5$ ($\epsilon_{\mathrm{dis}}$) | 0.004 | 0.010 | 0.015 | **0.027** |
+| TFIM $g{=}3.5$ (local) | 0.021 | 0.025 | 0.030 | 0.026 |
+| verdict | ✅ | ✅ | ✅ | ➖ break-even (1.03×) |
+
+Even the strongest winner **reaches break-even at $L_x = 7$**: $\epsilon_{\mathrm{dis}}$ **grows with
+column height** ($0.004 \to 0.027$ over $L_x\,4\!\to\!7$) while local stays flat (~$0.026$) because it
+exploits locality per column. This is the global sketch's fundamental $L_x$-accumulation (exp07): the
+sketch applies the *whole* column operator, so its error compounds over the taller column while
+local's per-column error is bounded. The disentangler **delays** the crossover — heis never, critical
+$g{=}3.04$ at $L_x{=}6$, paramagnet $g{=}3.5$ at $L_x{=}7$ — a clean hardness→crossover-$L_x$ gradient,
+but the hold is not indefinite at this operating point. (It is at *fixed* $\kappa = 2$; a larger
+$\kappa$ retains a bigger composite and should push the crossover higher — an untested lever.)
+
 ## 4. Mechanism — it's the column rank, not a broken disentangler
 
 - **Null test passes everywhere** ($\max$ `null_std` $\sim 10^{-20}$): a naive gauge on the existing
@@ -135,8 +154,9 @@ Plain global (no disentangler) must spend $\eta_q = 6\!-\!8$ to match local on t
 **cannot match at all** ($\eta_q = 8$, `matched = 0`) on the hard states — the fat-carry problem the
 disentangler exists to solve. For the states where `m2` holds accuracy at $\eta = 4$, the FLOP model
 projects a large end-to-end speedup ($\sim 12\!-\!21\times$); for the losers the speedup is void
-because accuracy isn't matched. *(TFIM $g{=}2.0$ is absent from this figure — its exp09 CSV was lost
-to the slug-collision bug; recovery queued, see §6.)*
+because accuracy isn't matched. (TFIM $g{=}2.0$, corrupted in wave 1, is now recovered and clean:
+matched at $\eta_q = 6\!\to\!8$ over $L_x\,4\!\to\!6$, propagated ratio $2.3 \to 0.65$ — the same
+crossover as the other TFIM points.)
 
 ## 6. Status & pending
 
@@ -147,8 +167,10 @@ to the slug-collision bug; recovery queued, see §6.)*
 | parallel disentanglers (cut-workers 1 vs 4) | ✅ $\sim 1.18\times$ on CPU (Amdahl-bound; the case *for* the GPU batch) |
 | **exp04 spectrum diagnostic** (all states) | ✅ confirms the ladder (§3a) |
 | **TFIM $g{=}1.0$** full $L_x$ | ✅ wins 4/5/6 (rank-1) |
-| **TFIM $g{=}2.0$** exp09 (corrupted) | ⏳ `sbatch --array=2` after the PID-slug fix |
-| $L_x = 7,8$ ceiling | ⏳ `STAGE=7/8` |
+| **TFIM $g{=}2.0$** exp09 (corrupted) | ✅ recovered, clean (§5) |
+| $L_x = 7$ ceiling | ✅ break-even for $g{=}3.5$ (§3b) |
+| $L_x = 8$ ceiling | ⏳ `STAGE=8` (dense probe) |
+| $L_x \ge 9$ matrix-free reach | ⏳ prep-limited; wave-4 (`RAND_ISOPEPS_DENSE_MAX_GB` low, `--lxs 8 9 10`) |
 | **exact thin-carry column** (residual-MPS / zip-up build) | 🔬 open *method* item — turns $\epsilon_{\mathrm{dis}}$ (best-case bracket, §3) into a direct measurement |
 
 **On the open method item:** every $\epsilon_{\mathrm{dis}}$ here is the *best-case* bracket endpoint
@@ -173,3 +195,8 @@ way as §3 — a direct, spectrum-side confirmation of the mechanism.
   $L_x$. **Correction:** wave-1 blamed $g{=}1.0$'s OOM on a "high-rank cat column" — exp04 falsifies
   that, its column is **rank-1** (SSB picks one ordered sector, a near-product state; the *easiest*
   state, not the hardest). The OOM was prep-side / a transient worker-concurrency peak, not column rank.
+- **2026-07-10 (wave 3):** $L_x{=}7$ ceiling + TFIM $g{=}2.0$ exp09 recovery, both clean. New result:
+  **the $\eta{=}4$ hold is finite** — even TFIM $g{=}3.5$ hits break-even at $L_x{=}7$ (§3b), because
+  $\epsilon_{\mathrm{dis}}$ accumulates with column height while local stays flat. The disentangler
+  *delays* the crossover (a hardness→$L_x$ gradient) rather than removing it, at fixed $\kappa{=}2$.
+  Infra: `publish.sh` now carries the Slurm `.out/.err` logs onto the results branch.
