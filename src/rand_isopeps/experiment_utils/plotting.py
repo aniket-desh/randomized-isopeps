@@ -118,6 +118,12 @@ STATE_COLORS = {
     "random": "#888888",     # gray (flat / worst case)
     "tfim": "#7b3294",       # purple
     "critical": "#e66101",   # orange (critical point)
+    "heis": "#b2182b",       # dark red -- the paper's high-entanglement hard case
+    "ordered": "#a6611a",    # ochre -- TFIM ordered phase (g < g_c, above g=1.5)
+    "deep_ordered": "#543005",  # dark brown -- deep-ordered TFIM (g <= 1.5, near-cat column)
+    "xxz": "#0072b2",        # blue -- XXZ Ising-like (Delta >= 1)
+    "xxz_xy": "#56b4e9",     # sky blue -- XXZ XY-like (Delta < 1)
+    "compass": "#009e73",    # green -- frustrated (square-lattice Kitaev analog)
 }
 
 
@@ -137,19 +143,37 @@ def method_style(key: str) -> tuple[str, str, str, str]:
 def state_style(state: str) -> tuple[str, str, str, str]:
     """``(label, color, marker, linestyle)`` for a column_sketch state key.
 
-    ``"random"`` -> gray dashed square (the flat worst case); ``"tfim@g"`` ->
-    a solid line, orange+diamond at/near the critical point (``g <~ 3.1``) and
-    purple+circle in the deeper paramagnet, with a ``"TFIM g=.."`` label."""
+    The state-spec grammar (see ``ham_from_spec``): ``random`` -> gray dashed square
+    (flat worst case); ``tfim@g`` -> solid line, orange+diamond near the critical point
+    (``g <~ 3.1``) and purple+circle in the deeper paramagnet; ``heis`` (vermillion ^),
+    ``xxz@D`` (blue v), ``compass`` (green P) -- the higher-entanglement survey states."""
     if state == "random":
         return ("random", STATE_COLORS["random"], "s", "--")
-    g = state.split("@")[1] if "@" in state else state
+    kind, _, arg = state.partition("@")
+    if kind == "tfim":
+        g = _as_float(arg)
+        if g is None or g >= 3.1:          # paramagnet (incl. g=3.5): purple circle
+            return (f"TFIM g={arg}", STATE_COLORS["tfim"], "o", "-")
+        if g >= 2.9:                        # critical point g~3.04: orange diamond (the anchor)
+            return (f"TFIM g={arg}", STATE_COLORS["critical"], "D", "-")
+        key = "ordered" if g > 1.5 else "deep_ordered"   # ordered phase: ochre -> dark brown
+        return (f"TFIM g={arg}", STATE_COLORS[key], "o", "-")
+    if kind == "heis":
+        return ("Heisenberg", STATE_COLORS["heis"], "^", "-")
+    if kind == "xxz":
+        d = _as_float(arg)
+        key = "xxz" if (d is None or d >= 1.0) else "xxz_xy"   # Ising-like blue / XY-like sky
+        return (rf"XXZ $\Delta$={arg}", STATE_COLORS[key], "v", "-")
+    if kind == "compass":
+        return ("Compass", STATE_COLORS["compass"], "P", "-")
+    return (state, "#444444", "o", "-")
+
+
+def _as_float(x: str) -> float | None:
     try:
-        critical = float(g) <= 3.1
-    except ValueError:
-        critical = False
-    if critical:
-        return (f"TFIM g={g}", STATE_COLORS["critical"], "D", "-")
-    return (f"TFIM g={g}", STATE_COLORS["tfim"], "o", "-")
+        return float(x)
+    except (TypeError, ValueError):
+        return None
 
 
 # Accept legacy descriptive marker names and matplotlib codes interchangeably; ""
