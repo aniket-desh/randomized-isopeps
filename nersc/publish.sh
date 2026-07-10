@@ -24,7 +24,14 @@ MSG="${1:-results: $(date -u +%Y-%m-%dT%H:%MZ) on $(hostname -s)}"
 DATA_MAX_MB="${DATA_MAX_MB:-200}"
 WT="$(dirname "$ROOT")/rand-isopeps-results"   # results worktree, sibling of the main checkout
 
-# 1) Regenerate the curated, tracked figures from the latest run outputs.
+# 1) Regenerate the curated, tracked figures from the latest run outputs. curate_figures imports
+#    rand_isopeps, so ensure the env is active -- a fresh login shell won't have it (this is why
+#    a bare `python` gave a SyntaxError). Activate only if the import is missing; an already-active
+#    env wins. Env prefix is optional (RISOPEPS_ENV overrides the default m4926 prefix).
+if ! python -c "import rand_isopeps" >/dev/null 2>&1; then
+  module load python >/dev/null 2>&1 || true
+  source activate "${RISOPEPS_ENV:-/global/common/software/m4926/rand-isopeps-env}" >/dev/null 2>&1 || true
+fi
 echo "== regenerating curated figures =="
 python experiments/column_sketch/scripts/curate_figures.py \
   || echo "!! curate_figures failed; publishing existing reports/figures as-is"
@@ -59,8 +66,12 @@ if ! git worktree list --porcelain | grep -q "^worktree $WT$"; then
 fi
 
 # 4) Sync into the worktree, mirroring repo paths (so local analysis uses the same paths).
+#    mkdir first: rsync only creates the FINAL dest component, so a nested dest whose parent
+#    ('reports/') is absent on a freshly-wiped orphan branch fails to mkdir. Pre-create both.
+mkdir -p "$WT/reports/figures"
 rsync -a --delete "$ROOT/reports/figures/" "$WT/reports/figures/"
 if [ "$include_data" -eq 1 ]; then
+  mkdir -p "$WT/outputs"
   rsync -a --delete "$ROOT/outputs/" "$WT/outputs/"
 else
   rm -rf "$WT/outputs"
