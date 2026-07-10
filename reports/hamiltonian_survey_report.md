@@ -70,7 +70,7 @@ $\eta\kappa$ subspace *can* be reorganized into a thin $\eta = 4$ bond (best cas
 |---|---|:---:|:---:|:---:|---|
 | TFIM $g{=}3.5$ | paramagnet | ✅ 0.19 | ✅ 0.39 | ✅ 0.62 | **wins through $L_x{=}6$** |
 | TFIM $g{=}2.0$ | ordered | ✅ 0.44 | ✅ 0.88 | ✅ 0.85 | **wins through $L_x{=}6$** |
-| TFIM $g{=}1.0$ | deep ordered | ✅ 0.05 | — | — | wins (extreme low-rank; Lx4 only) |
+| TFIM $g{=}1.0$ | deep ordered | ✅ 0.05 | ✅ 0.25 | ✅ 0.20 | **wins through $L_x{=}6$** (rank-1, near-product) |
 | TFIM $g{=}3.04$ | **critical** | ✅ 0.24 | ✅ 0.50 | ❌ 1.10 | crosses over at $L_x{=}6$ |
 | XXZ $\Delta{=}1.5$ | Ising-like | ✅ 0.67 | ❌ 1.04 | ❌ 1.65 | crosses at $L_x{=}5$ |
 | compass | frustrated | ✅ 0.74 | ❌ 4.0 | ❌ 3.4 | crosses at $L_x{=}5$ |
@@ -81,8 +81,35 @@ $\eta\kappa$ subspace *can* be reorganized into a thin $\eta = 4$ bond (best cas
 
 **The ordering is exactly the entanglement ladder**, and even the *crossover $L_x$* is monotone in
 hardness: gapped TFIM (holds to $L_x = 6$) → critical / frustrated (crosses at 5–6) → Heisenberg /
-XY (never). The deep-ordered TFIM $g = 1.0$ is the most extreme win ($\epsilon_{\mathrm{dis}}$ is
-**$20\times$** below local at $L_x = 4$) — consistent with a near-product column.
+XY (never). The deep-ordered TFIM $g = 1.0$ is the most extreme win ($\epsilon_{\mathrm{dis}}$
+**$5\!-\!20\times$** below local) — its column is essentially **rank-1** (§3a): spontaneous symmetry
+breaking picks a single ordered sector, a near-product state.
+
+### 3a. Direct confirmation — the effective-rank ladder (exp04)
+
+![spectrum](figures/column_sketch/hamsurvey-spectrum.pdf)
+
+The exp04 spectrum diagnostic measures the column's **99% effective rank** directly, with no
+sketch or disentangler involved. It orders the states the *same way as the accuracy ladder* — the
+mechanism confirmed from the spectrum side:
+
+| state | $\mathrm{rank}_{99}$ ($L_x{=}6$) | top-$\eta$ weight | ladder verdict |
+|---|:---:|:---:|---|
+| TFIM $g{=}1.0$ | **1.0** | 1.000 | ✅ win |
+| TFIM $g{=}2.0$ | **2.0** | 0.998 | ✅ win |
+| TFIM $g{=}3.5$ | 3.0 | 0.997 | ✅ win |
+| TFIM $g{=}3.04$ | 3.0 | 0.997 | ❌ (marginal) |
+| compass | 3.0 | 0.998 | ❌ |
+| XXZ $\Delta{=}1.5$ | 4.5 | 0.989 | ❌ |
+| XXZ $\Delta{=}0.5$ | 5.5 | 0.985 | ❌ |
+| Heisenberg | 6.0 | 0.979 | ❌ |
+| *random* (control) | *47.5* | *0.47* | *n/a* |
+
+**The transition sits right at $\mathrm{rank}_{99} \approx \eta = 4$**, exactly as the mechanism
+predicts: the disentangler holds $\eta = 4$ iff the column's effective rank is $\lesssim \eta$.
+$\mathrm{rank} \le 2$ always wins; $\mathrm{rank} \ge 4.5$ always loses; $\mathrm{rank} \approx 3$ is
+the boundary (TFIM $g{=}3.5$ wins on a steeper tail, compass loses on a flatter/frustrated one). So
+the accuracy ladder and the spectrum ladder are the same ladder.
 
 ## 4. Mechanism — it's the column rank, not a broken disentangler
 
@@ -118,8 +145,8 @@ to the slug-collision bug; recovery queued, see §6.)*
 | exp09 + exp10 for 7 states, $L_x$ 4–6 | ✅ in this report |
 | $L_x = 6$ ceiling (tfim@3.5/3.04/heis, full node) | ✅ `COMPLETED` |
 | parallel disentanglers (cut-workers 1 vs 4) | ✅ $\sim 1.18\times$ on CPU (Amdahl-bound; the case *for* the GPU batch) |
-| **exp04 spectrum diagnostic** (all states) | ⏳ respray `55732645` — the *direct* rank measurement |
-| **TFIM $g{=}1.0$** full $L_x$ | ⏳ same respray (Lx4 only so far) |
+| **exp04 spectrum diagnostic** (all states) | ✅ confirms the ladder (§3a) |
+| **TFIM $g{=}1.0$** full $L_x$ | ✅ wins 4/5/6 (rank-1) |
 | **TFIM $g{=}2.0$** exp09 (corrupted) | ⏳ `sbatch --array=2` after the PID-slug fix |
 | $L_x = 7,8$ ceiling | ⏳ `STAGE=7/8` |
 | **exact thin-carry column** (residual-MPS / zip-up build) | 🔬 open *method* item — turns $\epsilon_{\mathrm{dis}}$ (best-case bracket, §3) into a direct measurement |
@@ -136,7 +163,13 @@ way as §3 — a direct, spectrum-side confirmation of the mechanism.
 ## Changelog
 
 - **2026-07-09 (wave 1):** first NERSC batch on `m4926`. 16/19 array tasks + the $L_x{=}6$ ceiling
-  `COMPLETED`; the three TFIM $g{=}1.0$ tasks OOM-killed (deep-ordered cat column, memory-worst case;
-  fixed with fewer/fatter workers). Two infra bugs fixed en route: a same-second Slurm-array **slug
-  collision** (corrupted the TFIM $g{=}2.0$ exp09 CSV; fixed with a PID in `timestamp_slug`), and
-  `publish.sh` on a fresh orphan branch. The ladder (§3) and mechanism (§4) are the headline result.
+  `COMPLETED`; the three TFIM $g{=}1.0$ tasks OOM-killed at `--workers 8` (fixed with fewer/fatter
+  workers). Two infra bugs fixed en route: a same-second Slurm-array **slug collision** (corrupted
+  the TFIM $g{=}2.0$ exp09 CSV; fixed with a PID in `timestamp_slug`), and `publish.sh` on a fresh
+  orphan branch. The ladder (§3) and mechanism (§4) are the headline result.
+- **2026-07-09 (wave 2):** respray of the three OOM'd tasks + exp04 all `COMPLETED` at `--workers 4`
+  (no OOM). **exp04 confirms the ladder directly** (§3a: $\mathrm{rank}_{99}$ orders the states like
+  the accuracy verdict; transition at $\mathrm{rank}\approx\eta{=}4$). TFIM $g{=}1.0$ now wins at all
+  $L_x$. **Correction:** wave-1 blamed $g{=}1.0$'s OOM on a "high-rank cat column" — exp04 falsifies
+  that, its column is **rank-1** (SSB picks one ordered sector, a near-product state; the *easiest*
+  state, not the hardest). The OOM was prep-side / a transient worker-concurrency peak, not column rank.

@@ -123,14 +123,17 @@ def build(data_dir: Path) -> list[str]:
                                               width=1000, height=380)))
 
     if e04:
-        g = _by_state_lx(e04)
-        # exp04 spectrum diagnostic: effective rank rho2 (the hypothesis' direct measurement).
-        key = next((k for k in ("rho2", "eff_rank", "n2") if any(k in r for r in e04)), None)
-        if key:
-            pa = Panel(r"Spectrum diagnostic: effective column rank",
-                       r"column height $L_x$", key, "linear", _series_per_state(g, key))
-            written.append(str(write_line_panels(FIGDIR / "hamsurvey-spectrum.pdf", [pa],
-                                                  width=560, height=380)))
+        # exp04 spectrum diagnostic -- the hypothesis' DIRECT measurement. Drop the 'random'
+        # control (effective rank ~48 dwarfs the physical states 1-6 and flattens the panel).
+        g = _by_state_lx([r for r in e04 if r.get("state") != "random"])
+        pa = Panel(r"Spectrum: 99% effective column rank (the ladder, directly)",
+                   r"column height $L_x$", r"$\mathrm{rank}_{99}$", "linear",
+                   _series_per_state(g, "col_eff_rank99"))
+        pb = Panel(r"Weight captured by the top $\eta$ modes",
+                   r"column height $L_x$", r"$\mathrm{col\_top\_eta\_frac}$", "linear",
+                   _series_per_state(g, "col_top_eta_frac"))
+        written.append(str(write_line_panels(FIGDIR / "hamsurvey-spectrum.pdf", [pa, pb],
+                                              width=1000, height=380)))
 
     _print_summary(e10, e09)
     return written
