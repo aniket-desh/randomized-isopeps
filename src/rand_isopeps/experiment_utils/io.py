@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -41,7 +42,10 @@ def output_paths(suite: str, slug: str) -> tuple[str, str]:
 
 
 def timestamp_slug() -> str:
-    return datetime.now().strftime("%Y%m%d-%H%M%S")
+    """A per-process-unique run slug: timestamp + PID. The PID matters -- Slurm array tasks that
+    start in the same wall-clock second would otherwise collide on the same output path and
+    interleave their CSV appends (observed 2026-07-09: exp09 tasks 2 & 3 merged a row)."""
+    return datetime.now().strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}"
 
 
 def write_csv(path: str | Path, rows: list[dict[str, object]]) -> Path:
