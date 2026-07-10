@@ -44,10 +44,27 @@ $\eta_q$ it must spend to match local), **exp10** (the 3-way at fixed $\eta = 4$
 
 ![ladder](figures/column_sketch/hamsurvey-ladder.pdf)
 
-**Left:** $\epsilon_{\mathrm{dis}} / \epsilon_{\mathrm{local}}$ vs $L_x$; **below the dashed line
-the disentangler beats local while holding $\eta = 4$.** **Right:** the disentangler's
-residual-truncation loss $\tau_{\mathrm{dis}} = \sqrt{\sum_i \mathrm{dis\_tail}} / \lVert Y\rVert$
-— low means the composite $\eta\kappa$ subspace *can* be reorganized into a thin $\eta = 4$ bond.
+**What $\epsilon_{\mathrm{dis}}$ is (read this before the table).** $\epsilon_{\mathrm{dis}}$ is *not*
+a direct measurement of the disentangled column — it is the **best-case bracket** of it. The
+$\eta{=}4$ disentangled column captures, per cut, the composite $\eta\kappa = 8$ subspace reorganized
+into a thin vertical $\eta{=}4$ bond plus a bounded horizontal residual $\kappa{=}2$;
+$\epsilon_{\mathrm{dis}}$ is the projection error of the **plain global sketch at $\eta_q = \eta\kappa
+= 8$** — i.e. the accuracy that column would reach *if* the residual reorganization were lossless. The
+true error is **bracketed**,
+$\epsilon_{\mathrm{dis}}\,(\eta_q{=}8) \le \epsilon_{\mathrm{true}} \le \epsilon_{\mathrm{plain}}\,
+(\eta_q{=}4)$, and hugs the best-case edge exactly when the residual-truncation loss
+$\tau_{\mathrm{dis}}$ (right panel) is $\ll \epsilon$. So the panels are coupled: the left is the best
+case, the right is how trustworthy it is. This **sharpens** the ladder — for winners $\tau_{\mathrm{dis}}
+\sim 10^{-4}$ so $\epsilon_{\mathrm{true}} \approx \epsilon_{\mathrm{dis}}$; for losers
+$\tau_{\mathrm{dis}} \sim 10^{-3}$ *and* $\epsilon_{\mathrm{dis}} \approx \epsilon_{\mathrm{plain}}$, so
+the bracket collapses onto plain-global and the true error is if anything **worse** than plotted
+("never wins" is a floor). The exact directly-measured thin-carry column (the residual-MPS / zip-up
+build) is the one still-open refinement (§6).
+
+**Left:** $\epsilon_{\mathrm{dis}} / \epsilon_{\mathrm{local}}$ vs $L_x$; **below the dashed line the
+disentangler's best case beats local while holding $\eta = 4$.** **Right:** the residual-truncation
+loss $\tau_{\mathrm{dis}} = \sqrt{\sum_i \mathrm{dis\_tail}} / \lVert Y\rVert$ — low means the composite
+$\eta\kappa$ subspace *can* be reorganized into a thin $\eta = 4$ bond (best case trustworthy).
 
 | state | phase | $L_x{=}4$ | $L_x{=}5$ | $L_x{=}6$ | verdict |
 |---|---|:---:|:---:|:---:|---|
@@ -105,6 +122,13 @@ to the slug-collision bug; recovery queued, see §6.)*
 | **TFIM $g{=}1.0$** full $L_x$ | ⏳ same respray (Lx4 only so far) |
 | **TFIM $g{=}2.0$** exp09 (corrupted) | ⏳ `sbatch --array=2` after the PID-slug fix |
 | $L_x = 7,8$ ceiling | ⏳ `STAGE=7/8` |
+| **exact thin-carry column** (residual-MPS / zip-up build) | 🔬 open *method* item — turns $\epsilon_{\mathrm{dis}}$ (best-case bracket, §3) into a direct measurement |
+
+**On the open method item:** every $\epsilon_{\mathrm{dis}}$ here is the *best-case* bracket endpoint
+(the plain sketch at $\eta_q = \eta\kappa$; see §3), not the literal disentangled column. The bracket
+is rigorous and the residual loss $\tau_{\mathrm{dis}}$ bounds the gap, but the decisive validation is
+the exact bounded-$\kappa$ residual-MPS build (a quick numpy version over-counted and was discarded);
+gated on the $\kappa{=}1$ collapse + isometry + bracket + monotonicity harness.
 
 **Prediction to test when exp04 lands:** the effective-rank curves should order the states the same
 way as §3 — a direct, spectrum-side confirmation of the mechanism.
