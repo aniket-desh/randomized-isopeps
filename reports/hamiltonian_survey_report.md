@@ -111,24 +111,37 @@ $\mathrm{rank} \le 2$ always wins; $\mathrm{rank} \ge 4.5$ always loses; $\mathr
 the boundary (TFIM $g{=}3.5$ wins on a steeper tail, compass loses on a flatter/frustrated one). So
 the accuracy ladder and the spectrum ladder are the same ladder.
 
-### 3b. $L_x = 7$ — the $\eta = 4$ hold is finite (first beyond-Mac point)
+### 3b. $L_x = 7,8$ — the $\eta = 4$ hold is finite (the ceiling runs)
 
-The $L_x = 7$ ceiling (full node, heis / tfim@3.04 / tfim@3.5) adds the crucial scaling point:
+The full-node ceiling ($L_x = 7$: heis / tfim@3.04 / tfim@3.5; $L_x = 8$: tfim@3.5 dense probe) adds
+the decisive scaling points. Tracking the strongest winner, TFIM $g{=}3.5$:
 
-| state | $L_x{=}4$ | $L_x{=}5$ | $L_x{=}6$ | $L_x{=}7$ |
-|---|:---:|:---:|:---:|:---:|
-| TFIM $g{=}3.5$ ($\epsilon_{\mathrm{dis}}$) | 0.004 | 0.010 | 0.015 | **0.027** |
-| TFIM $g{=}3.5$ (local) | 0.021 | 0.025 | 0.030 | 0.026 |
-| verdict | ✅ | ✅ | ✅ | ➖ break-even (1.03×) |
+| state | $L_x{=}4$ | $L_x{=}5$ | $L_x{=}6$ | $L_x{=}7$ | $L_x{=}8$ |
+|---|:---:|:---:|:---:|:---:|:---:|
+| TFIM $g{=}3.5$ ($\epsilon_{\mathrm{dis}}$) | 0.004 | 0.010 | 0.015 | 0.027 | **~0.038**† |
+| TFIM $g{=}3.5$ (local) | 0.021 | 0.025 | 0.030 | 0.026 | 0.028 |
+| verdict | ✅ win | ✅ win | ✅ win | ➖ break-even (1.03×) | ❌ **loss** |
 
-Even the strongest winner **reaches break-even at $L_x = 7$**: $\epsilon_{\mathrm{dis}}$ **grows with
-column height** ($0.004 \to 0.027$ over $L_x\,4\!\to\!7$) while local stays flat (~$0.026$) because it
+† $L_x{=}8$ ran exp09 only (the dense probe); $\epsilon_{\mathrm{dis}}$ is read off its
+best-case bracket = plain global at $\eta_q = \eta\kappa = 8$, where `matched = 0`: plain global
+*cannot reach local even at $\eta_q = 8$*, so the disentangler's best case is already above local.
+
+So the strongest winner's full arc is **win (4–6) → break-even (7) → loss (8)**: $\epsilon_{\mathrm{dis}}$
+**grows with column height** ($0.004 \to 0.038$ over $L_x\,4\!\to\!8$) while local stays flat (~$0.026$)
+because it
 exploits locality per column. This is the global sketch's fundamental $L_x$-accumulation (exp07): the
 sketch applies the *whole* column operator, so its error compounds over the taller column while
 local's per-column error is bounded. The disentangler **delays** the crossover — heis never, critical
-$g{=}3.04$ at $L_x{=}6$, paramagnet $g{=}3.5$ at $L_x{=}7$ — a clean hardness→crossover-$L_x$ gradient,
-but the hold is not indefinite at this operating point. (It is at *fixed* $\kappa = 2$; a larger
-$\kappa$ retains a bigger composite and should push the crossover higher — an untested lever.)
+$g{=}3.04$ at $L_x{=}6$, paramagnet $g{=}3.5$ break-even at $L_x{=}7$ then loss at $L_x{=}8$ — a clean
+hardness→crossover-$L_x$ gradient, but the hold is not indefinite at this operating point. (It is at
+*fixed* $\kappa = 2$; a larger $\kappa$ retains a bigger composite and should push the crossover
+higher — an untested lever.)
+
+**Dense reach (measured).** The $L_x = 8$ probe **completed** on one 512 GB CPU node ($n_{\text{out}}
+= 2^8 = 256$, the full dense column, ~200 GB peak, `--workers 1 --blas-threads 128`) — so the dense
+ceiling is **$L_x = 8$**. $L_x = 9$ (1.1 TB dense) is the wall; beyond it the QR must run matrix-free
+(Hutchinson $\epsilon$), which is the wave-4 experiment. This replaces the earlier *modelled* sizing
+with a measured ceiling.
 
 ## 4. Mechanism — it's the column rank, not a broken disentangler
 
@@ -169,8 +182,9 @@ crossover as the other TFIM points.)
 | **TFIM $g{=}1.0$** full $L_x$ | ✅ wins 4/5/6 (rank-1) |
 | **TFIM $g{=}2.0$** exp09 (corrupted) | ✅ recovered, clean (§5) |
 | $L_x = 7$ ceiling | ✅ break-even for $g{=}3.5$ (§3b) |
-| $L_x = 8$ ceiling | ⏳ `STAGE=8` (dense probe) |
-| $L_x \ge 9$ matrix-free reach | ⏳ prep-limited; wave-4 (`RAND_ISOPEPS_DENSE_MAX_GB` low, `--lxs 8 9 10`) |
+| $L_x = 8$ ceiling | ✅ **dense ceiling = $L_x{=}8$** on 512 GB; $g{=}3.5$ loses (§3b) |
+| $L_x \ge 9$ matrix-free reach | ⏳ dense wall at 9 (1.1 TB); wave-4 (`RAND_ISOPEPS_DENSE_MAX_GB` low, `--lxs 8 9 10`) |
+| $L_x{=}8$ disentangler (exp10) direct point | ⏳ optional (`exp10 --lxs 8`); the exp09 bracket already implies the loss |
 | **exact thin-carry column** (residual-MPS / zip-up build) | 🔬 open *method* item — turns $\epsilon_{\mathrm{dis}}$ (best-case bracket, §3) into a direct measurement |
 
 **On the open method item:** every $\epsilon_{\mathrm{dis}}$ here is the *best-case* bracket endpoint
@@ -200,3 +214,8 @@ way as §3 — a direct, spectrum-side confirmation of the mechanism.
   $\epsilon_{\mathrm{dis}}$ accumulates with column height while local stays flat. The disentangler
   *delays* the crossover (a hardness→$L_x$ gradient) rather than removing it, at fixed $\kappa{=}2$.
   Infra: `publish.sh` now carries the Slurm `.out/.err` logs onto the results branch.
+- **2026-07-10 (wave 3b):** $L_x{=}8$ dense probe **completed** on one 512 GB node — **dense ceiling
+  = $L_x{=}8$** ($L_x{=}9$ is the 1.1 TB wall → matrix-free). TFIM $g{=}3.5$'s arc completes:
+  **win (4–6) → break-even (7) → loss (8)** — at $L_x{=}8$ plain global can't reach local even at
+  $\eta_q{=}8$ (`matched=0`), so the disentangler best case is already above local. Logs now flow
+  through `results/logs/`.
