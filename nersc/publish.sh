@@ -1,7 +1,7 @@
 #!/bin/bash
-# Publish this run's FIGURES + result data to the 'results' branch, so everything is available
-# locally with a single `git fetch` -- no NERSC login / MFA needed on the local side. RUN ON A
-# LOGIN NODE (needs internet; compute nodes have none).
+# Publish this run's FIGURES + result data + Slurm logs (.out/.err) to the 'results' branch, so
+# everything is available locally with a single `git fetch` -- no NERSC login / MFA needed on the
+# local side. RUN ON A LOGIN NODE (needs internet; compute nodes have none).
 #
 #   bash nersc/publish.sh ["commit message"]
 #
@@ -77,6 +77,17 @@ else
   rm -rf "$WT/outputs"
 fi
 
+# 4b) Also carry the Slurm job logs (.out/.err, written to the submit dir = repo root). Small text,
+#     but invaluable after the fact: energy trajectories, per-task timings, OOM traces, the reason a
+#     task failed. Mirror the current root-level set (RISOPEPS_LOGDIR overrides the search dir).
+logdir="${RISOPEPS_LOGDIR:-$ROOT}"
+rm -rf "$WT/logs"
+if compgen -G "$logdir"/*.out >/dev/null 2>&1 || compgen -G "$logdir"/*.err >/dev/null 2>&1; then
+  mkdir -p "$WT/logs"
+  find "$logdir" -maxdepth 1 -type f \( -name '*.out' -o -name '*.err' \) -exec cp {} "$WT/logs/" \;
+  echo "== carrying $(find "$WT/logs" -type f | wc -l | tr -d ' ') Slurm log(s) -> results/logs/ =="
+fi
+
 # 5) Commit + push (quiet no-op if nothing changed).
 git -C "$WT" add -A
 if git -C "$WT" diff --cached --quiet; then
@@ -86,5 +97,6 @@ fi
 git -C "$WT" commit -q -m "$MSG"
 git -C "$WT" push origin results
 what="figures"; [ "$include_data" -eq 1 ] && what="figures + data"
+[ -d "$WT/logs" ] && what="$what + logs"
 echo "== published ${what} -> origin/results =="
-echo "   locally:  git fetch origin results   (then analyze from the 'results' ref)"
+echo "   locally:  git fetch origin results   (then analyze from the 'results' ref; logs in logs/)"

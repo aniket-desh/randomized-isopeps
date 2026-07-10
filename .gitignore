@@ -24,6 +24,11 @@
 # raw data pulled back from NERSC by nersc/pull_data.sh (never versioned)
 /nersc-data/
 
+# Slurm job logs (job-name-jobid.out/.err) land in the submit dir = repo root; kept out of main
+# but carried on the 'results' branch by nersc/publish.sh
+/*.out
+/*.err
+
 # python
 __pycache__/
 *.py[cod]
