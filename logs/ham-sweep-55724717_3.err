@@ -1,0 +1,48 @@
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D

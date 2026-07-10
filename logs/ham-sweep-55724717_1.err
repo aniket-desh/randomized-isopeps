@@ -1,0 +1,66 @@
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/site-packages/cotengra/hyperoptimizers/hyper.py:36: UserWarning: Couldn't import `kahypar` - skipping from default hyper optimizer and using basic `labels` method instead. `kahypar` is highly recommended for the best quality contraction paths.
+  warnings.warn(
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/common/software/m4926/rand-isopeps-env/lib/python3.11/importlib/__init__.py:126: FutureWarning: The module 'quimb.tensor.tensor_2d' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.core`.
+  return _bootstrap._gcd_import(name[level:], package, level)
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/real_isotns/tebd2.py:27: FutureWarning: The module 'quimb.tensor.tensor_2d_tebd' is deprecated and will be removed in a future release. Most functionality can be still be accessed directly from 'quimb.tensor' instead. The actual implementations have moved to `quimb.tensor.tn2d.tebd`.
+  from quimb.tensor.tensor_2d_tebd import LocalHam2D
+Traceback (most recent call last):
+  File "/pscratch/sd/a/aniketd/randomized-isopeps/experiments/column_sketch/scripts/exp09_end_to_end_propagated_cost.py", line 433, in <module>
+    data, fig = run(parse_args())
+                ^^^^^^^^^^^^^^^^^
+  File "/pscratch/sd/a/aniketd/randomized-isopeps/experiments/column_sketch/scripts/exp09_end_to_end_propagated_cost.py", line 275, in run
+    for batch in run_parallel_stream(_run_trial, tasks, workers):
+  File "/global/u2/a/aniketd/randomized-isopeps/src/rand_isopeps/experiment_utils/parallel.py", line 93, in run_parallel_stream
+    yield fut.result()
+          ^^^^^^^^^^^^
+  File "/global/common/software/m4926/rand-isopeps-env/lib/python3.11/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/global/common/software/m4926/rand-isopeps-env/lib/python3.11/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+concurrent.futures.process.BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[2026-07-09T19:34:34.346] error: Detected 1 oom_kill event in StepId=55724722.0. Some of the step tasks have been OOM Killed.
+srun: error: nid004134: task 0: Out Of Memory
+srun: Terminating StepId=55724722.0

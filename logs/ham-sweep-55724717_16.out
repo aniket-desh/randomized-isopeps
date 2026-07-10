@@ -1,0 +1,4 @@
+[ham-sweep 16] 16:14:43 python experiments/column_sketch/scripts/exp10_vertical_disentangler_mechanism.py --lxs 4 5 6 --kappa 2 --seeds 4 --workers 8 --cut-workers 4 --blas-threads 1 --states compass
+wrote /pscratch/sd/a/aniketd/randomized-isopeps/outputs/column_sketch/data/exp10-disentangler-20260709-161449.csv
+wrote /pscratch/sd/a/aniketd/randomized-isopeps/outputs/column_sketch/figures/exp10-disentangler-20260709-161449.pdf
+[ham-sweep 16] 16:23:37 done

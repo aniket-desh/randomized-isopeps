@@ -1,0 +1,2 @@
+[ham-sweep 9] 14:34:15 python experiments/column_sketch/scripts/exp10_vertical_disentangler_mechanism.py --lxs 4 5 6 --kappa 2 --seeds 4 --workers 8 --cut-workers 4 --blas-threads 1 --states tfim@1.0
+[ham-sweep 9] 14:38:00 done

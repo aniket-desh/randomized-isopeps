@@ -1,0 +1,4 @@
+[ham-sweep 8] 14:23:58 python experiments/column_sketch/scripts/exp09_end_to_end_propagated_cost.py --lxs 4 5 6 --prep-eta 4 --eta-targets 4 --seeds 4 --workers 8 --blas-threads 1 --states compass
+wrote /pscratch/sd/a/aniketd/randomized-isopeps/outputs/column_sketch/data/exp9-propagated-cost-20260709-142402.csv
+wrote /pscratch/sd/a/aniketd/randomized-isopeps/outputs/column_sketch/figures/exp9-propagated-cost-20260709-142402.pdf
+[ham-sweep 8] 14:33:43 done

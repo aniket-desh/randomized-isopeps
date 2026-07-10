@@ -1,0 +1,2 @@
+[ham-sweep 0] 12:29:52 python experiments/column_sketch/scripts/exp04_real_column_spectrum.py --lxs 4 5 6 --seeds 4 --workers 8 --blas-threads 1 --states random tfim@1.0 tfim@2.0 tfim@3.04 tfim@3.5 heis xxz@0.5 xxz@1.5 compass
+[ham-sweep 0] 12:33:58 done
