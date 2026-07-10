@@ -15,9 +15,9 @@
 #SBATCH --qos=shared
 #SBATCH --nodes=1                     # shared REQUIRES --nodes=1 per array task
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32            # ~64 GB cgroup on shared -- see the worker math below
+#SBATCH --cpus-per-task=64            # ~256 GB shared cgroup -- headroom for the memory note below
 #SBATCH --time=12:00:00
-#SBATCH --array=0-18%10               # = number of CONFIGS below; %10 caps concurrency
+#SBATCH --array=0-18%8                # = number of CONFIGS below; %8 caps concurrency
 #SBATCH --output=%x-%A_%a.out
 #SBATCH --error=%x-%A_%a.err
 #SBATCH --mail-type=END,FAIL
@@ -28,18 +28,19 @@ source activate /global/common/software/m4926/rand-isopeps-env
 
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1   # floor; scripts re-pin BLAS
 
-# Worker math (32 logical CPUs, ~64 GB cgroup -- the auto worker cap sees the NODE's 512 GB,
-# NOT the cgroup, so --workers is EXPLICIT everywhere here):
-#   exp04/exp09:  --workers 8,  prep@eta=4 ~3 GB/worker -> ~24 GB.  (exp09 pinned to
-#                 --prep-eta 4 --eta-targets 4, the canonical operating point; the default
-#                 prep-eta 6 costs ~25 GB/worker and belongs on a full node -> lx_ceiling.)
-#   exp10:        --workers 8 x --cut-workers 4 = 32 busy CPUs.
-S09="--lxs 4 5 6 --prep-eta 4 --eta-targets 4 --seeds 4 --workers 8 --blas-threads 1"
-S10="--lxs 4 5 6 --kappa 2 --seeds 4 --workers 8 --cut-workers 4 --blas-threads 1"
+# Worker math / MEMORY (learned the hard way, 2026-07-09): --workers is the concurrent memory
+# knob (each worker holds a column materialize + prep). The first run OOM-killed tfim@1.0 at
+# --workers 8: g=1.0 lands in a high-effective-rank (cat) column whose Lx=6 factorize spikes far
+# past the low-rank states. CAUTION: auto_worker_count reads the NODE's 512 GB (sysconf), NOT the
+# shared cgroup (~4 GB/core), so it can't protect you here -- --workers is EXPLICIT and CONSERVATIVE.
+# 64 cores -> ~256 GB cgroup; 4 workers -> ~64 GB headroom each (fits the cat spike), 4x{blas|cut}
+# threads fill the cores. prep pinned to eta=4 (~3 GB); default prep-eta 6 (~25 GB) is lx_ceiling's.
+S09="--lxs 4 5 6 --prep-eta 4 --eta-targets 4 --seeds 4 --workers 4 --blas-threads 16"
+S10="--lxs 4 5 6 --kappa 2 --seeds 4 --workers 4 --cut-workers 4 --blas-threads 4"
 
 CONFIGS=(
   # --- exp04: column spectrum diagnostic, all states at once (cheap) -------------------
-  "experiments/column_sketch/scripts/exp04_real_column_spectrum.py --lxs 4 5 6 --seeds 4 --workers 8 --blas-threads 1 --states random tfim@1.0 tfim@2.0 tfim@3.04 tfim@3.5 heis xxz@0.5 xxz@1.5 compass"
+  "experiments/column_sketch/scripts/exp04_real_column_spectrum.py --lxs 4 5 6 --seeds 4 --workers 4 --blas-threads 16 --states random tfim@1.0 tfim@2.0 tfim@3.04 tfim@3.5 heis xxz@0.5 xxz@1.5 compass"
   # --- exp09: end-to-end cost + eta-to-match, one state per task -----------------------
   "experiments/column_sketch/scripts/exp09_end_to_end_propagated_cost.py $S09 --states tfim@1.0"
   "experiments/column_sketch/scripts/exp09_end_to_end_propagated_cost.py $S09 --states tfim@2.0"
