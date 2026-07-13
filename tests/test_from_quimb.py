@@ -1,8 +1,14 @@
 """Validate the real-isoTNS column extractor (the PEPS bridge). Skipped without quimb."""
 
+import os
+
 import numpy as np
 import pytest
 
+# Some user-site quimb installations enable numba's source cache even when the
+# package directory is not a cacheable import locator.  Disabling that optional
+# cache changes no numerics and keeps collection portable.
+os.environ.setdefault("QUIMB_NUMBA_CACHE", "False")
 pytest.importorskip("quimb")
 
 from rand_isopeps.column.from_quimb import find_center_column, from_quimb_column  # noqa: E402

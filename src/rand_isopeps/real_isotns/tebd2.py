@@ -22,6 +22,8 @@ single state (no block index). Verified to lower the energy toward the exact
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import quimb as qu
 import quimb.tensor as qtn
 from quimb.tensor.tensor_2d_tebd import LocalHam2D
@@ -149,3 +151,87 @@ def imaginary_time(psi, ham, taus, steps, chi, eta, cutoff=1e-10, Ndis=10,
             k += 1
     energies.append(energy(psi, ham, e_max_bond))
     return psi, energies
+
+
+@dataclass
+class PreparationStep:
+    tau: float
+    stage: int
+    sweep: int
+    energy: float
+    relative_energy_change: float
+    stable_count: int
+
+
+@dataclass
+class PreparationResult:
+    steps: list[PreparationStep]
+    converged: bool
+    final_energy: float
+    final_relative_energy_change: float
+
+
+def imaginary_time_converged(
+    psi,
+    ham,
+    *,
+    taus=(0.3, 0.1, 0.03, 0.01),
+    chi,
+    eta,
+    cutoff=1e-10,
+    Ndis=10,
+    energy_rtol=1e-6,
+    stable_sweeps=3,
+    min_sweeps_per_tau=3,
+    max_sweeps_per_tau=40,
+    rand=None,
+    e_max_bond=32,
+):
+    """Imaginary-time preparation with a common, recorded convergence gate.
+
+    Every sweep records its energy.  Each ``tau`` stage continues until the
+    relative energy change is below ``energy_rtol`` for ``stable_sweeps``
+    consecutive sweeps (after ``min_sweeps_per_tau``), or until the stage cap is
+    reached.  The returned ``converged`` flag is true only if the *final* stage
+    satisfies that same rule; callers must reject or separately label false
+    preparations rather than silently mixing them with converged states.
+    """
+    if stable_sweeps < 1 or min_sweeps_per_tau < 1 or max_sweeps_per_tau < 1:
+        raise ValueError("sweep counts must be positive")
+    if min_sweeps_per_tau > max_sweeps_per_tau:
+        raise ValueError("min_sweeps_per_tau cannot exceed max_sweeps_per_tau")
+    if energy_rtol <= 0:
+        raise ValueError("energy_rtol must be positive")
+
+    records: list[PreparationStep] = []
+    direction = 1
+    previous = energy(psi, ham, e_max_bond)
+    final_stage_converged = False
+    for stage, tau in enumerate(tuple(float(t) for t in taus)):
+        gates = _gates(ham, tau)
+        stable = 0
+        stage_converged = False
+        for sweep in range(int(max_sweeps_per_tau)):
+            _sweep(psi, gates, chi, eta, cutoff, Ndis, direction, rand)
+            direction = -direction
+            psi.equalize_norms_(1.0)
+            current = energy(psi, ham, e_max_bond)
+            rel = abs(current - previous) / max(abs(current), abs(previous), 1e-15)
+            stable = stable + 1 if rel <= energy_rtol else 0
+            records.append(PreparationStep(
+                tau=tau, stage=stage, sweep=sweep, energy=float(current),
+                relative_energy_change=float(rel), stable_count=stable,
+            ))
+            previous = current
+            if sweep + 1 >= min_sweeps_per_tau and stable >= stable_sweeps:
+                stage_converged = True
+                break
+        final_stage_converged = stage_converged
+
+    final_rel = records[-1].relative_energy_change if records else float("inf")
+    return psi, PreparationResult(
+        steps=records,
+        converged=bool(final_stage_converged),
+        final_energy=float(previous),
+        final_relative_energy_change=float(final_rel),
+    )

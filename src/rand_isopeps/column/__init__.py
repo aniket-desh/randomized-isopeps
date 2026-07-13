@@ -23,6 +23,14 @@ columns by swapping the ``ColumnOperator`` constructor.
 
 from .operator import ColumnOperator, controlled_spectrum_column_matrix, random_column_operator
 from .global_range import GlobalRangeResult, global_column_range, reference_svd, sampled_bond_growth
+from .bounded_residual import (
+    BoundedResidualResult,
+    ProjectionScore,
+    apply_boundary_factorization,
+    bounded_residual_column_qr,
+    score_projection_error,
+)
+from .diagnostics import column_diagnostics, operator_cut_spectra, spectrum_diagnostics
 
 __all__ = [
     "ColumnOperator",
@@ -32,4 +40,12 @@ __all__ = [
     "global_column_range",
     "reference_svd",
     "sampled_bond_growth",
+    "BoundedResidualResult",
+    "ProjectionScore",
+    "bounded_residual_column_qr",
+    "score_projection_error",
+    "apply_boundary_factorization",
+    "column_diagnostics",
+    "operator_cut_spectra",
+    "spectrum_diagnostics",
 ]
