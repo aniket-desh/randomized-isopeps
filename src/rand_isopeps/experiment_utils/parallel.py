@@ -5,12 +5,28 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from multiprocessing import get_context
 from typing import TypeVar
 
 from threadpoolctl import threadpool_limits
 
 T = TypeVar("T")
 R = TypeVar("R")
+
+
+def _process_pool(workers: int) -> ProcessPoolExecutor:
+    """Create isolated workers without inheriting BLAS/OpenMP runtime state.
+
+    Linux defaults to ``fork``, which is unsafe after the parent has initialized
+    threaded numerical libraries (for example by running ``eigsh`` before a
+    sweep).  A forked child can then terminate below Python, surfacing only as a
+    ``BrokenProcessPool``.  ``spawn`` starts each worker from a clean interpreter
+    and is consistent across local and NERSC execution.
+    """
+    return ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=get_context("spawn"),
+    )
 
 
 def total_ram_bytes() -> int | None:
@@ -64,7 +80,7 @@ def run_parallel(
     if workers <= 1 or len(tasks) <= 1:
         return [func(task) for task in tasks]
     try:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
+        with _process_pool(workers) as pool:
             return list(pool.map(func, tasks))
     except PermissionError:
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -87,7 +103,7 @@ def run_parallel_stream(
             yield func(task)
         return
     try:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
+        with _process_pool(workers) as pool:
             futures = [pool.submit(func, task) for task in tasks]
             for fut in as_completed(futures):
                 yield fut.result()

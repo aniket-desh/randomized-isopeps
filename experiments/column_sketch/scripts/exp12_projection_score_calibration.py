@@ -16,7 +16,7 @@ from rand_isopeps.experiment_utils.run_store import (
     make_identity,
     write_manifest,
 )
-from rand_isopeps.parallel import auto_worker_count, flatten, run_parallel, with_blas_threads
+from rand_isopeps.parallel import auto_worker_count, run_parallel_stream, with_blas_threads
 
 SCHEMA_VERSION = "projection-score-calibration-v5"
 SUITE = "projection_score_calibration"
@@ -209,8 +209,11 @@ def run(args):
         for lx in args.lxs for ensemble in args.ensembles
         for problem in range(args.problem_seeds)
     ]
-    for row in flatten(run_parallel(_run_problem, tasks, auto_worker_count(args.workers))):
-        store.append(row)
+    for rows in run_parallel_stream(
+        _run_problem, tasks, auto_worker_count(args.workers)
+    ):
+        for row in rows:
+            store.append(row)
     return out / "results.csv", out / "manifest.json"
 
 

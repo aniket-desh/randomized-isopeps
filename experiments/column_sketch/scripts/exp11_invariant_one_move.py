@@ -30,7 +30,11 @@ from rand_isopeps.experiment_utils.run_store import (
     make_identity,
     write_manifest,
 )
-from rand_isopeps.parallel import auto_worker_count, run_parallel, with_blas_threads
+from rand_isopeps.parallel import (
+    auto_worker_count,
+    run_parallel_stream,
+    with_blas_threads,
+)
 
 SCHEMA_VERSION = "invariant-one-move-v9"
 SUITE = "invariant_one_move"
@@ -795,7 +799,7 @@ def run(args):
         for state in args.states for prep in range(args.prep_seeds)
     ]
     workers = auto_worker_count(args.workers)
-    for result in run_parallel(_run_problem, tasks, workers):
+    for result in run_parallel_stream(_run_problem, tasks, workers):
         if result["preparation"] is not None:
             prep_store.append(result["preparation"])
         for row in result["rows"]:
