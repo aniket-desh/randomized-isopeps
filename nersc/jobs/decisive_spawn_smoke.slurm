@@ -22,4 +22,4 @@ export PYTHONUNBUFFERED=1
 cd "$SLURM_SUBMIT_DIR"
 
 srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
-  pytest -q tests/test_parallel.py
+  python nersc/smoke_spawn.py
