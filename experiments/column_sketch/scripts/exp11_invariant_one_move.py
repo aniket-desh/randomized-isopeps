@@ -19,6 +19,8 @@ import argparse
 import json
 import math
 import os
+from collections import OrderedDict
+from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 
@@ -36,7 +38,7 @@ from rand_isopeps.parallel import (
     with_blas_threads,
 )
 
-SCHEMA_VERSION = "invariant-one-move-v9"
+SCHEMA_VERSION = "invariant-one-move-v10"
 SUITE = "invariant_one_move"
 
 IDENTITY_FIELDS = [
@@ -87,6 +89,7 @@ PREPARATION_RESULT_FIELDS = [
     "prep_max_abs_magnetization_z", "prep_row_cut_renyi2",
     "prep_column_cut_renyi2", "prep_row_cut_von_neumann",
     "prep_column_cut_von_neumann", "prep_correlation_length_z",
+    "prep_column_cache_runtime_s", "prep_column_cache_bytes",
 ]
 PREPARATION_FIELDS = IDENTITY_FIELDS + PREPARATION_RESULT_FIELDS
 
@@ -108,16 +111,14 @@ def _dense_hamiltonian(ham, lx, ly):
     return h.tocsr()
 
 
-def _dense_observables(vector, lx, ly):
+@lru_cache(maxsize=None)
+def _z_geometry(lx, ly):
     n = lx * ly
-    norm = float(np.vdot(vector, vector).real)
-    probability = np.abs(np.asarray(vector).reshape(-1)) ** 2
-    basis = np.arange(probability.size, dtype=np.uint64)
+    basis = np.arange(2 ** n, dtype=np.uint64)
     signs = np.stack([
         1 - 2 * ((basis >> np.uint64(n - 1 - site)) & np.uint64(1)).astype(np.int8)
         for site in range(n)
     ])
-    mags = signs @ probability / max(norm, 1e-300)
     pairs = []
     for i in range(lx):
         for j in range(ly):
@@ -125,10 +126,20 @@ def _dense_observables(vector, lx, ly):
                 pairs.append((i * ly + j, (i + 1) * ly + j))
             if j + 1 < ly:
                 pairs.append((i * ly + j, i * ly + j + 1))
-    corrs = [
-        float(np.dot(signs[a] * signs[b], probability) / max(norm, 1e-300))
-        for a, b in pairs
-    ]
+    pair_signs = np.stack([signs[a] * signs[b] for a, b in pairs]) if pairs else np.empty(
+        (0, basis.size), dtype=np.int8
+    )
+    signs.setflags(write=False)
+    pair_signs.setflags(write=False)
+    return signs, pair_signs
+
+
+def _dense_observables(vector, lx, ly):
+    norm = float(np.vdot(vector, vector).real)
+    probability = np.abs(np.asarray(vector).reshape(-1)) ** 2
+    signs, pair_signs = _z_geometry(lx, ly)
+    mags = signs @ probability / max(norm, 1e-300)
+    corrs = pair_signs @ probability / max(norm, 1e-300)
     # X on every site maps each computational basis index to its bitwise
     # complement, which is simply reversed row-major ordering for qubits.
     parity = float((np.vdot(vector, np.asarray(vector)[::-1]) / max(norm, 1e-300)).real)
@@ -136,6 +147,19 @@ def _dense_observables(vector, lx, ly):
 
 
 _GROUND_ENERGY_CACHE = {}
+_DENSE_HAMILTONIAN_CACHE = OrderedDict()
+
+
+def _cached_dense_hamiltonian(ham, state, lx, ly):
+    """Reuse the sparse exact Hamiltonian across preparation seeds in a worker."""
+    key = (state, int(lx), int(ly))
+    if key not in _DENSE_HAMILTONIAN_CACHE:
+        _DENSE_HAMILTONIAN_CACHE[key] = _dense_hamiltonian(ham, lx, ly)
+        while len(_DENSE_HAMILTONIAN_CACHE) > 2:
+            _DENSE_HAMILTONIAN_CACHE.popitem(last=False)
+    else:
+        _DENSE_HAMILTONIAN_CACHE.move_to_end(key)
+    return _DENSE_HAMILTONIAN_CACHE[key]
 
 
 def _state_cut_diagnostics(vector, lx, ly):
@@ -167,14 +191,9 @@ def _state_cut_diagnostics(vector, lx, ly):
 
 
 def _correlation_length_z(vector, lx, ly, mags):
-    n = lx * ly
     norm = float(np.vdot(vector, vector).real)
     probability = np.abs(np.asarray(vector).reshape(-1)) ** 2
-    basis = np.arange(probability.size, dtype=np.uint64)
-    signs = np.stack([
-        1 - 2 * ((basis >> np.uint64(n - 1 - site)) & np.uint64(1)).astype(np.int8)
-        for site in range(n)
-    ])
+    signs, _ = _z_geometry(lx, ly)
     by_distance = {}
     for i in range(lx):
         for j in range(ly):
@@ -223,7 +242,7 @@ def _exact_context(
     vector = np.asarray(psi.to_dense()).reshape(-1)
     norm = float(np.linalg.norm(vector))
     vector = vector / max(norm, 1e-300)
-    h = _dense_hamiltonian(ham, lx, ly) if ham is not None else None
+    h = _cached_dense_hamiltonian(ham, state, lx, ly) if ham is not None else None
     if h is None:
         energy = variance = float("nan")
     else:
@@ -436,7 +455,10 @@ def _empty_method_fields():
     }
 
 
-def _global_method(psi, op, method, config, seed, score_seed, args):
+def _global_method(
+    psi, op, method, config, seed, score_seed, args,
+    dense_reference=None, reference_singular_values=None,
+):
     from rand_isopeps.column.bounded_residual import (
         apply_boundary_factorization,
         bounded_residual_column_qr,
@@ -447,7 +469,8 @@ def _global_method(psi, op, method, config, seed, score_seed, args):
         op, ell=config["ell"], eta=config["eta"], kappa=config["kappa"],
         chi_sk=config["chi_sk"], sketch_kind=config["sketch_kind"],
         n_power=config["n_power"], ndis=config["ndis"],
-        rng=np.random.default_rng(seed), reference=None,
+        rng=np.random.default_rng(seed), reference=dense_reference,
+        reference_singular_values=reference_singular_values,
     )
     score = None
     if args.score_probes > 0:
@@ -627,11 +650,31 @@ def _run_problem(task):
         psi, ham, prep = _prepare(args, state, prep_seed)
         center_j, split = find_center_column(psi)
         op = from_quimb_column(psi, center_j, split=split, normalize=False)
+        cache_t0 = perf_counter()
+        dense_reference = reference_singular_values = None
+        if op.n_out * op.n_in <= 2_000_000:
+            import scipy.linalg as la
+
+            dense_reference = op.materialize()
+            reference_singular_values = la.svdvals(
+                dense_reference, check_finite=False
+            )
+        from rand_isopeps.column.diagnostics import operator_cut_spectra
+
+        operator_spectra_cache = operator_cut_spectra(op)
+        column_cache_runtime = perf_counter() - cache_t0
+        column_cache_bytes = sum(s.nbytes for s in operator_spectra_cache)
+        if dense_reference is not None:
+            column_cache_bytes += dense_reference.nbytes + reference_singular_values.nbytes
         exact = _exact_context(
             psi, ham, args.lx, args.ly, args.exact_max_sites, state, args.ed_max_sites,
             ground_energies.get(state, float("nan")),
         )
-        prep_all_fields = {**_prep_fields(prep), **_prepared_state_fields(exact)}
+        prep_all_fields = {
+            **_prep_fields(prep), **_prepared_state_fields(exact),
+            "prep_column_cache_runtime_s": column_cache_runtime,
+            "prep_column_cache_bytes": column_cache_bytes,
+        }
         prep_config = {
             "state": state, "lx": args.lx, "ly": args.ly,
             "bond": args.bond, "phys": args.phys, "chi": args.chi,
@@ -658,6 +701,8 @@ def _run_problem(task):
         }
         prep_fields = dict(prep_all_fields)
         prep_fields.pop("prep_energy_trace")
+        prep_fields.pop("prep_column_cache_runtime_s")
+        prep_fields.pop("prep_column_cache_bytes")
         rows = []
         predictor_cache = {}
 
@@ -709,12 +754,17 @@ def _run_problem(task):
             if identity["run_key"] in completed_keys:
                 continue
             from rand_isopeps.column.diagnostics import column_diagnostics
-
             predictor_key = (method_cfg["eta"], method_cfg["kappa"])
             if predictor_key not in predictor_cache:
                 predictor_cache[predictor_key] = column_diagnostics(
                     op, eta=method_cfg["eta"], kappa=method_cfg["kappa"],
                     dense_max_elements=args.diagnostic_dense_max_elements,
+                    operator_spectra_cache=operator_spectra_cache,
+                    flat_singular_values=(
+                        reference_singular_values
+                        if op.n_out * op.n_in <= args.diagnostic_dense_max_elements
+                        else None
+                    ),
                 )
             predictors = predictor_cache[predictor_key]
             base = {
@@ -739,7 +789,8 @@ def _run_problem(task):
                 else:
                     cfg = dict(method_cfg, ndis=args.ndis, center_j=center_j, split=split)
                     moved, fields = _global_method(
-                        psi, op, method, cfg, sketch_seed, score_seed, args
+                        psi, op, method, cfg, sketch_seed, score_seed, args,
+                        dense_reference, reference_singular_values,
                     )
                 metrics = _state_metrics(psi, moved, ham, exact, args)
                 total = perf_counter() - t_method

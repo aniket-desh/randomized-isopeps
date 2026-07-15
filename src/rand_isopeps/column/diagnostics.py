@@ -86,6 +86,8 @@ def column_diagnostics(
     eta: int,
     kappa: int,
     dense_max_elements: int = 2_000_000,
+    operator_spectra_cache: list[np.ndarray] | None = None,
+    flat_singular_values: np.ndarray | None = None,
 ) -> dict[str, object]:
     """Predictors used to explain factorization difficulty.
 
@@ -93,7 +95,13 @@ def column_diagnostics(
     are included only under the explicit dense oracle limit and otherwise set to
     ``NaN`` rather than triggering a hidden materialization.
     """
-    spectra = operator_cut_spectra(column)
+    spectra = (
+        operator_cut_spectra(column)
+        if operator_spectra_cache is None
+        else operator_spectra_cache
+    )
+    if len(spectra) != max(column.lx - 1, 0):
+        raise ValueError("operator spectra cache has incompatible length")
     cut_stats = [spectrum_diagnostics(s) for s in spectra]
     cut_r99 = [int(x["r99"]) for x in cut_stats]
     cut_renyi2 = [float(x["renyi2"]) for x in cut_stats]
@@ -104,7 +112,13 @@ def column_diagnostics(
     flat = {"rank": float("nan"), "r99": float("nan"),
             "renyi2": float("nan"), "von_neumann": float("nan")}
     if column.n_out * column.n_in <= int(dense_max_elements):
-        singular = la.svdvals(column.materialize(), check_finite=False)
+        singular = (
+            la.svdvals(column.materialize(), check_finite=False)
+            if flat_singular_values is None
+            else np.asarray(flat_singular_values, dtype=float)
+        )
+        if singular.ndim != 1 or singular.size != min(column.n_out, column.n_in):
+            raise ValueError("flat singular-value cache has incompatible shape")
         flat = spectrum_diagnostics(singular)
 
     return {

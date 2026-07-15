@@ -38,3 +38,19 @@ def test_column_diagnostics_dense_guard_and_serialized_cut_fields():
     assert np.isnan(guarded["column_flat_r99"])
     assert len(json.loads(guarded["operator_cut_r99"])) == op.lx - 1
     assert len(json.loads(guarded["operator_cut_tail_eta_kappa"])) == op.lx - 1
+
+
+def test_cached_spectra_match_uncached_diagnostics():
+    op = random_column_operator(
+        4, 2, 3, 2, np.random.default_rng(14), complex_valued=False
+    )
+    flat = la.svdvals(op.materialize(), check_finite=False)
+    spectra = operator_cut_spectra(op)
+    uncached = column_diagnostics(
+        op, eta=2, kappa=2, dense_max_elements=10_000_000
+    )
+    cached = column_diagnostics(
+        op, eta=2, kappa=2, dense_max_elements=10_000_000,
+        operator_spectra_cache=spectra, flat_singular_values=flat,
+    )
+    assert cached == uncached

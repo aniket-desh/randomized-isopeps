@@ -622,6 +622,7 @@ def bounded_residual_column_qr(
     ndis: int = 10,
     rng: np.random.Generator | None = None,
     reference: np.ndarray | None = None,
+    reference_singular_values: np.ndarray | None = None,
     dense_oracle_max_elements: int = 2_000_000,
 ) -> BoundedResidualResult:
     """Execute the matrix-free sampled-range factorization and build ``Q^* C``.
@@ -721,19 +722,28 @@ def bounded_residual_column_qr(
             / max(np.linalg.norm(y_dense), 1e-300)
         )
         c_dense = column.materialize() if reference is None else reference
+        if reference_singular_values is None:
+            singular_c = la.svdvals(c_dense, check_finite=False)
+        else:
+            singular_c = np.asarray(reference_singular_values, dtype=float)
+            if singular_c.ndim != 1 or singular_c.size != min(c_dense.shape):
+                raise ValueError("reference singular values have incompatible shape")
+        c_norm_sq = float(np.sum(singular_c ** 2))
         r_dense = ColumnOperator(residual_cores).materialize()
         projection_error = float(
-            np.linalg.norm(c_dense - q_dense @ r_dense) / max(np.linalg.norm(c_dense), 1e-300)
+            np.linalg.norm(c_dense - q_dense @ r_dense)
+            / max(np.sqrt(c_norm_sq), 1e-300)
         )
-        singular_c = la.svdvals(c_dense, check_finite=False)
         spectral_tail = float(np.sqrt(
             np.sum(singular_c[q_columns:] ** 2)
-            / max(np.sum(singular_c ** 2), 1e-300)
+            / max(c_norm_sq, 1e-300)
         ))
         projection_excess = float(np.sqrt(max(
             projection_error ** 2 - spectral_tail ** 2, 0.0
         )))
-        peak = max(peak, sum(x.nbytes for x in (q_dense, y_dense, rs_dense, c_dense, r_dense)))
+        peak = max(peak, sum(
+            x.nbytes for x in (q_dense, y_dense, rs_dense, c_dense, r_dense, singular_c)
+        ))
 
     oracle_runtime = perf_counter() - oracle_t0
     return BoundedResidualResult(

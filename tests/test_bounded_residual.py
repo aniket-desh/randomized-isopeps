@@ -210,3 +210,23 @@ def test_fresh_projection_score_is_seed_deterministic():
     da.pop("runtime_s")
     db.pop("runtime_s")
     assert da == db
+
+
+def test_cached_dense_reference_matches_uncached_oracle():
+    op = _op(seed=41, out_dim=4)
+    reference = op.materialize()
+    singular = la.svdvals(reference, check_finite=False)
+    kwargs = dict(
+        ell=4, eta=2, kappa=2, chi_sk=2, sketch_kind="rmps",
+        n_power=0, ndis=1,
+    )
+    uncached = bounded_residual_column_qr(
+        op, rng=np.random.default_rng(91), **kwargs
+    )
+    cached = bounded_residual_column_qr(
+        op, rng=np.random.default_rng(91), reference=reference,
+        reference_singular_values=singular, **kwargs
+    )
+    assert np.isclose(cached.projection_error_dense, uncached.projection_error_dense)
+    assert np.isclose(cached.spectral_tail_dense, uncached.spectral_tail_dense)
+    assert np.isclose(cached.projection_excess_dense, uncached.projection_excess_dense)
