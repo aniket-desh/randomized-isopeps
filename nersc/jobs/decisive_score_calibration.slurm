@@ -21,6 +21,13 @@ export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 export QUIMB_NUMBA_CACHE=False PYTHONUNBUFFERED=1
 cd "$SLURM_SUBMIT_DIR"
 
+CFS_OUT="/global/cfs/cdirs/m4926/risopeps/outputs"
+stage_results() {
+  mkdir -p "$CFS_OUT"
+  cp -ru outputs/. "$CFS_OUT"/
+}
+trap stage_results EXIT
+
 srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
   python experiments/column_sketch/scripts/exp12_projection_score_calibration.py \
     --lxs 2 3 4 5 6 \
@@ -29,7 +36,3 @@ srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
     --score-chis 1 2 4 8 0 --score-probes-grid 16 64 \
     --problem-seeds 4 --score-seeds 4 --bootstrap 500 \
     --workers 8 --blas-threads 8
-
-CFS_OUT="/global/cfs/cdirs/m4926/risopeps/outputs"
-mkdir -p "$CFS_OUT"
-cp -ru outputs/. "$CFS_OUT"/

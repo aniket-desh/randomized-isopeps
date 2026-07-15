@@ -26,6 +26,7 @@ stage_results() {
   mkdir -p "$CFS_OUT"
   cp -ru outputs/. "$CFS_OUT"/
 }
+trap stage_results EXIT
 
 run_size() {
   local lx="$1" prep_seeds="$2" sketch_seeds="$3" score_probes="$4"
