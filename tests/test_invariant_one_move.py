@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("QUIMB_NUMBA_CACHE", "False")
 
@@ -18,6 +19,8 @@ assert _SPEC.loader is not None
 _SPEC.loader.exec_module(_MODULE)
 _dense_hamiltonian = _MODULE._dense_hamiltonian
 _dense_observables = _MODULE._dense_observables
+_scale_safe_dense_state = _MODULE._scale_safe_dense_state
+_method_grid = _MODULE._method_grid
 _state_cut_diagnostics = _MODULE._state_cut_diagnostics
 _boundary_overlap = _MODULE._boundary_overlap
 _boundary_observables = _MODULE._boundary_observables
@@ -91,3 +94,40 @@ def test_boundary_metrics_match_exact_small_contraction():
     mags, corrs = _boundary_observables(a, 2, 2, max_bond=32)
     assert np.allclose(mags, exact_mags, atol=1e-10)
     assert np.allclose(corrs, exact_corrs, atol=1e-10)
+
+
+def test_scale_safe_dense_state_avoids_global_exponent_overflow():
+    import pytest
+    import quimb.tensor as qtn
+
+    psi = qtn.PEPS.rand(2, 2, bond_dim=2, phys_dim=2, seed=17)
+    reference = psi.copy()
+    reference.exponent = 0.0
+    raw = np.asarray(reference.to_dense()).reshape(-1)
+    expected = raw / np.linalg.norm(raw)
+
+    psi.exponent = 400.0
+    vector, log10_norm = _scale_safe_dense_state(psi)
+    assert np.all(np.isfinite(vector))
+    assert np.allclose(vector, expected)
+    assert log10_norm == pytest.approx(400.0 + np.log10(np.linalg.norm(raw)))
+    assert psi.exponent == 400.0
+
+
+def test_one_at_a_time_grid_avoids_cartesian_explosion():
+    methods = [
+        "local_det", "local_rsvd2", "global_gaussian", "global_rmps_plain",
+        "global_rmps_bounded", "global_kron",
+    ]
+    common = dict(
+        methods=methods, eta_grid=(4,), ell_grid=(), sketch_seeds=4,
+        n_power_grid=(0, 1), chi_sk_grid=(1, 2, 4, 8),
+        kappa_grid=(1, 2, 3, 4), ell_oversampling_grid=(2, 4, 8),
+    )
+    op = SimpleNamespace(n_in=65536)
+    cartesian = len(_method_grid(SimpleNamespace(**common, grid_mode="cartesian"), op))
+    one_at_a_time = len(
+        _method_grid(SimpleNamespace(**common, grid_mode="one_at_a_time"), op)
+    )
+    assert cartesian == 513
+    assert one_at_a_time == 117

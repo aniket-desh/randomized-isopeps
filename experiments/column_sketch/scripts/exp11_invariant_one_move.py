@@ -38,7 +38,7 @@ from rand_isopeps.parallel import (
     with_blas_threads,
 )
 
-SCHEMA_VERSION = "invariant-one-move-v10"
+SCHEMA_VERSION = "invariant-one-move-v11"
 SUITE = "invariant_one_move"
 
 IDENTITY_FIELDS = [
@@ -109,6 +109,31 @@ def _dense_hamiltonian(ham, lx, ly):
         # ``ikron`` only pads a fused operator correctly on contiguous sites.
         h = h + qu.pkron(term, dims, inds, sparse=True)
     return h.tocsr()
+
+
+def _scale_safe_dense_state(psi):
+    """Return a unit vector and log10 norm without exponent overflow.
+
+    Quimb stores a tensor-network-wide base-10 exponent separately from the
+    tensor mantissas. ``to_dense`` reapplies it, which can overflow even though
+    the normalized state is perfectly representable. Temporarily contracting
+    at exponent zero preserves the state direction; the physical norm is then
+    tracked in log space.
+    """
+    exponent = float(getattr(psi, "exponent", 0.0))
+    if not np.isfinite(exponent):
+        raise RuntimeError(f"tensor-network exponent is non-finite: {exponent}")
+    try:
+        psi.exponent = 0.0
+        vector = np.asarray(psi.to_dense()).reshape(-1)
+    finally:
+        psi.exponent = exponent
+    if not np.all(np.isfinite(vector)):
+        raise RuntimeError("dense state mantissa contains non-finite values")
+    norm = float(np.linalg.norm(vector))
+    if not np.isfinite(norm) or norm <= 0.0:
+        raise RuntimeError(f"dense state mantissa has invalid norm {norm}")
+    return vector / norm, exponent + math.log10(norm)
 
 
 @lru_cache(maxsize=None)
@@ -239,9 +264,7 @@ def _exact_context(
 ):
     if lx * ly > max_sites:
         return None
-    vector = np.asarray(psi.to_dense()).reshape(-1)
-    norm = float(np.linalg.norm(vector))
-    vector = vector / max(norm, 1e-300)
+    vector, log10_norm = _scale_safe_dense_state(psi)
     h = _cached_dense_hamiltonian(ham, state, lx, ly) if ham is not None else None
     if h is None:
         energy = variance = float("nan")
@@ -267,7 +290,7 @@ def _exact_context(
         ground_energy = float("nan")
     cut_diagnostics = _state_cut_diagnostics(vector, lx, ly)
     return {
-        "vector": vector, "raw_norm": norm, "hamiltonian": h,
+        "vector": vector, "log10_norm": log10_norm, "hamiltonian": h,
         "energy": energy, "variance": variance,
         "mags": mags, "corrs": corrs, "parity": parity, "ground_energy": ground_energy,
         "correlation_length_z": _correlation_length_z(vector, lx, ly, mags),
@@ -308,13 +331,15 @@ def _boundary_observables(psi, lx, ly, max_bond):
 def _state_metrics(reference, method, ham, exact, args):
     t0 = perf_counter()
     if exact is not None:
-        vector = np.asarray(method.to_dense()).reshape(-1)
-        norm = float(np.linalg.norm(vector))
-        vector_n = vector / max(norm, 1e-300)
+        vector_n, log10_norm = _scale_safe_dense_state(method)
         overlap = np.vdot(exact["vector"], vector_n)
         infidelity = max(1.0 - abs(overlap) ** 2, 0.0)
-        norm_ref = float(exact["raw_norm"])
-        norm_drift = norm / max(norm_ref, 1e-300) - 1.0
+        log_ratio = math.log(10.0) * (log10_norm - exact["log10_norm"])
+        norm_drift = (
+            float(np.expm1(log_ratio))
+            if log_ratio < math.log(np.finfo(float).max)
+            else float("inf")
+        )
         if exact["hamiltonian"] is not None:
             hv = exact["hamiltonian"] @ vector_n
             energy = float(np.vdot(vector_n, hv).real)
@@ -582,6 +607,18 @@ def _method_grid(args, op):
             tuple(args.ell_grid)
             + tuple(int(eta) + int(p) for p in args.ell_oversampling_grid)
         ))
+        baseline = {
+            "ell": min(ell_values, key=lambda value: (abs(value - (int(eta) + 4)), value)),
+            "chi_sk": max(args.chi_sk_grid),
+            "kappa": 2 if 2 in args.kappa_grid else args.kappa_grid[0],
+            "n_power": 0 if 0 in args.n_power_grid else args.n_power_grid[0],
+        }
+
+        def include(config, relevant):
+            if args.grid_mode == "cartesian":
+                return True
+            return sum(config[key] != baseline[key] for key in relevant) <= 1
+
         if "local_det" in enabled:
             methods.append((
                 "local_det", -1,
@@ -600,36 +637,32 @@ def _method_grid(args, op):
                 ell = min(int(ell_requested), op.n_in)
                 for n_power in args.n_power_grid:
                     if "global_gaussian" in enabled:
-                        methods.append((
-                            "global_gaussian", sketch_index,
-                            {"eta": eta, "kappa": 1, "chi_sk": 0, "ell": ell,
-                             "n_power": n_power, "sketch_kind": "gaussian"},
-                        ))
+                        config = {"eta": eta, "kappa": 1, "chi_sk": 0, "ell": ell,
+                                  "n_power": n_power, "sketch_kind": "gaussian"}
+                        if include(config, ("ell", "n_power")):
+                            methods.append(("global_gaussian", sketch_index, config))
                     for chi_sk in args.chi_sk_grid:
                         if "global_rmps_plain" in enabled:
-                            methods.append((
-                                "global_rmps_plain", sketch_index,
-                                {"eta": eta, "kappa": 1, "chi_sk": chi_sk,
-                                 "ell": ell, "n_power": n_power,
-                                 "sketch_kind": "rmps"},
-                            ))
+                            config = {"eta": eta, "kappa": 1, "chi_sk": chi_sk,
+                                      "ell": ell, "n_power": n_power,
+                                      "sketch_kind": "rmps"}
+                            if include(config, ("chi_sk", "ell", "n_power")):
+                                methods.append(("global_rmps_plain", sketch_index, config))
                         for kappa in args.kappa_grid:
                             if kappa == 1 or "global_rmps_bounded" not in enabled:
                                 continue  # exactly the plain method above
-                            methods.append((
-                                "global_rmps_bounded", sketch_index,
-                                {"eta": eta, "kappa": kappa, "chi_sk": chi_sk,
-                                 "ell": ell, "n_power": n_power,
-                                 "sketch_kind": "rmps"},
-                            ))
+                            config = {"eta": eta, "kappa": kappa, "chi_sk": chi_sk,
+                                      "ell": ell, "n_power": n_power,
+                                      "sketch_kind": "rmps"}
+                            if include(config, ("kappa", "chi_sk", "ell", "n_power")):
+                                methods.append(("global_rmps_bounded", sketch_index, config))
                     for kappa in args.kappa_grid:
                         if "global_kron" in enabled:
-                            methods.append((
-                                "global_kron", sketch_index,
-                                {"eta": eta, "kappa": kappa, "chi_sk": 1,
-                                 "ell": ell, "n_power": n_power,
-                                 "sketch_kind": "kron"},
-                            ))
+                            config = {"eta": eta, "kappa": kappa, "chi_sk": 1,
+                                      "ell": ell, "n_power": n_power,
+                                      "sketch_kind": "kron"}
+                            if include(config, ("kappa", "ell", "n_power")):
+                                methods.append(("global_kron", sketch_index, config))
     unique = []
     seen = set()
     for method, sketch_index, config in methods:
@@ -793,6 +826,13 @@ def _run_problem(task):
                         dense_reference, reference_singular_values,
                     )
                 metrics = _state_metrics(psi, moved, ham, exact, args)
+                required_finite = (
+                    "state_infidelity", "norm_drift",
+                    "max_magnetization_z_error", "max_correlator_zz_error",
+                ) + (("parity_x",) if exact is not None else ())
+                invalid = [name for name in required_finite if not np.isfinite(metrics[name])]
+                if invalid:
+                    raise RuntimeError(f"non-finite primary metrics: {invalid}")
                 total = perf_counter() - t_method
                 row = {**base, **metrics, **fields, "total_runtime_s": total,
                        "status": "ok", "failure_reason": ""}
@@ -887,6 +927,10 @@ def parse_args():
                         help="also use ell=eta+p for each listed oversampling p")
     parser.add_argument("--n-power", type=int, default=0)
     parser.add_argument("--n-power-grid", type=int, nargs="+")
+    parser.add_argument(
+        "--grid-mode", choices=("cartesian", "one_at_a_time"), default="cartesian",
+        help="full product or baseline-centered one-factor-at-a-time parameter curves",
+    )
     parser.add_argument("--oversample", type=int, default=4)
     parser.add_argument("--ndis", type=int, default=10)
     parser.add_argument("--score-chi", type=int, default=8)

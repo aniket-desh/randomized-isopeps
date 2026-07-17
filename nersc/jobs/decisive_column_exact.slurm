@@ -43,4 +43,4 @@ srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
     --prep-seeds 16 --sketch-seeds 4 \
     --score-probes 0 \
     --exact-max-sites 16 --ed-max-sites 16 --boundary-bond 64 \
-    --workers 16 --blas-threads 8
+    --workers 4 --blas-threads 32

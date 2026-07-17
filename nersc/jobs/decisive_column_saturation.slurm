@@ -34,10 +34,11 @@ srun -n 1 -c "$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
     --lx 4 --ly 4 --states random tfim@1.0 tfim@3.04 heis \
     --bond 2 --chi 8 --prep-eta 8 --eta-grid 4 \
     --kappa-grid 1 2 3 4 --chi-sk-grid 1 2 4 8 \
-    --ell-oversampling-grid 2 4 8 --n-power-grid 0 1 --ndis 10 \
+    --ell-oversampling-grid 2 4 8 --n-power-grid 0 1 \
+    --grid-mode one_at_a_time --ndis 10 \
     --taus 0.3 0.1 0.03 0.01 --energy-rtol 1e-6 \
     --stable-sweeps 3 --min-sweeps-per-tau 3 --max-sweeps-per-tau 40 \
     --prep-seeds 8 --sketch-seeds 4 \
     --score-probes 0 \
     --exact-max-sites 16 --ed-max-sites 16 --boundary-bond 64 \
-    --workers 16 --blas-threads 8
+    --workers 4 --blas-threads 32
