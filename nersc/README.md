@@ -31,11 +31,12 @@ pull/push`) run on a login node; the job only runs and stages results.
 
 - This project runs **CPU jobs** (`-C cpu`), not GPU. It's dominated by dense/randomized
   SVDs, QRs and matmuls.
-- **The levers are two *script* flags, not env vars: `--workers` and `--blas-threads`.** The
-  default worker count is laptop-capped (4–12), so **you must pass `--workers` on a big node**
-  or you'll idle 116+ cores. See §6 — this is the one thing to get right.
-- Parameter sweeps (Lx × states × seeds, or a batch of different ideas) → **one node with
-  `--workers ~120`**, or a **Slurm job array** on the **`shared`** QOS. See §5–6.
+- The active physics runner owns one sequential trajectory. Parallelize modes,
+  Hamiltonians, and seeds with a Slurm array; `--blas-threads` is its only
+  in-process parallelism knob. The older sketching laboratory still uses
+  `--workers` as described in §6.
+- Dense and small-PEPS accuracy sweeps use the `shared` QOS; 4x4 PEPS trajectories
+  use a full CPU node. The code is NumPy/SciPy/quimb and does not use the GPU pool.
 - Large-Lx runs are **memory-bound** (dense column ~`16·2^Lx·8^Lx` bytes); the worker count
   is auto-capped by RAM. See §6.1.
 
@@ -56,9 +57,11 @@ pull/push`) run on a login node; the job only runs and stages results.
   ```bash
   sacctmgr -p show assoc user=$USER format=account,qos
   ```
-- **Your allocation** (project `m4926` = *farqu*, user `aniketd`, PI Van Beeumen; *as of
-  2026-07-09*): your personal caps are ~**450 CPU** node-hrs (`-A m4926`) and ~**1,799 GPU**
-  node-hrs (`-A m4926_g`) — a 10% slice of the shared project pool (~4,500 CPU / ~18,000 GPU).
+- **Your allocation** (project `m4926` = *farqu*, user `aniketd`, PI Van Beeumen):
+  the live 2026-08-05 snapshot showed **366.1 released CPU node-hours, 109.8
+  charged, and about 256.3 remaining** on `m4926`; `m4926_g` showed **1427.6 GPU
+  node-hours unused**. These values drift, so refresh them in Iris before a large submission.
+  The personal caps are roughly 450 CPU and 1,799 GPU node-hours, a 10% slice of the shared pool.
   Charge factor is **1.0**, so node-hours = walltime × nodes × QOS-factor. Allocation releases
   **quarterly** (10/20/30/40%) and unused *released* hours expire — watch "Hours at risk" in
   Iris. CFS is `/global/cfs/cdirs/m4926` (20 TB). The GPU pool is unused (CPU-only stack today).
@@ -146,17 +149,20 @@ experiment, then `sbatch`.
 | [`shared_small.slurm`](templates/shared_small.slurm) | a quick / small run without burning a full node | `-q shared -c 16` |
 | [`gpu_job.slurm`](templates/gpu_job.slurm) | **reference only** — if you ever add a torch/cupy backend | `-C gpu -A …_g --gpus-per-node=4` |
 
-Ready-to-submit runs for the planned studies live in [`jobs/`](jobs/): `ham_sweep.slurm`
-(the Hamiltonian survey array — TFIM ladder / heis / xxz / compass, one task per
-instrument × state, with the parallel per-cut disentanglers) and `lx_ceiling.slurm`
-(full-node Lx = 6 → 7 → 8 staging via `STAGE=`). Both are `m4926`-filled; just `sbatch`.
+The active phase-two jobs are [`physics_small_array.slurm`](jobs/physics_small_array.slurm)
+for dense/2x2--3x3 accuracy and [`physics_large_peps.slurm`](jobs/physics_large_peps.slurm)
+for paired 4x4 local-versus-rMPS trajectories. Both are `m4926`-filled, write JSONL,
+and copy it to CFS. They are prepared but are not submitted automatically.
 
-Example experiment line — the current frontier is the `column_sketch` end-to-end cost sweep,
-which is process-parallel (**pass `--workers`**; §6):
+The older `ham_sweep.slurm`, `lx_ceiling.slurm`, and `decisive_column_*.slurm` files
+remain phase-one sketching jobs for reproducibility.
+
+The active experiment line is one trajectory per task:
 ```bash
 srun -n 1 -c $SLURM_CPUS_PER_TASK --cpu-bind=cores \
-  python experiments/column_sketch/scripts/exp09_end_to_end_propagated_cost.py \
-    --lxs 3 4 5 --states random tfim@3.5 tfim@3.04 --workers 96 --blas-threads 1
+  python experiments/physics_loop/run.py --mode peps_sketch --lx 4 --ly 4 \
+    --stage 0.05:5 --stage 0.02:10 --ell 8 --eta 4 --kappa 2 --chi-sk 4 \
+    --gate-bond 8 --absorption-bond 8 --blas-threads 32
 ```
 A quick smoke test (the real isoTNS Moses move):
 ```bash
@@ -169,7 +175,9 @@ For a large-Lx single column, flip to the big-linalg regime: `--lxs 7 --workers 
 
 ## 6. Workers vs. threads, and memory (read this — it's what wastes a node)
 
-`rand_isopeps` experiments do **not** run as one big multi-threaded process. Each script
+The active `physics_loop` runner is one sequential trajectory; use the supplied
+Slurm arrays for independent runs and `--blas-threads` within a run. The retained
+phase-one sketching experiments do **not** run as one big multi-threaded process. Each script
 spawns a **pool of worker processes** (`ProcessPoolExecutor`, one trial per worker) and
 **pins BLAS to a single thread inside each worker** (via `threadpoolctl`). Two *script* flags
 control this, and they matter more than any env var:

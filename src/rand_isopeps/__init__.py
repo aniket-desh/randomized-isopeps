@@ -1,9 +1,9 @@
-"""randomized isoPEPS / Moses Move kernels.
+"""Physics-first imaginary-time isoPEPS with rMPS-sketched column moves.
 
-Shared library for the ``randomized-isopeps`` repo. It holds the reusable
-randomized-linear-algebra kernels, tensor-ring decomposition, MPO-MPS
-absorption, synthetic ensembles, and plotting/IO/parallel helpers used by the
-experiment suites (e.g. ``synthetic/``).
+The active APIs are :mod:`rand_isopeps.physics`,
+:mod:`rand_isopeps.real_isotns.physics_loop`, and
+:mod:`rand_isopeps.sketching`. Phase-one method-development modules remain
+available so their experiments stay reproducible.
 """
 
 from .tn_shapes import MosesDims

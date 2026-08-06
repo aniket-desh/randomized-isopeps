@@ -51,6 +51,19 @@ def test_synthetic_tensors_backcompat_is_canonical():
     assert compat is canonical
 
 
+def test_sketching_facade_reuses_validated_kernels():
+    from rand_isopeps.column.operator import ColumnOperator as implementation_operator
+    from rand_isopeps.linalg.rmps_sketch import rmps_cores as implementation_rmps
+    from rand_isopeps.linalg.sketches import range_sample as implementation_distribution
+    from rand_isopeps.sketching.distributions import range_sample
+    from rand_isopeps.sketching.operator import ColumnOperator
+    from rand_isopeps.sketching.rmps import rmps_cores
+
+    assert ColumnOperator is implementation_operator
+    assert rmps_cores is implementation_rmps
+    assert range_sample is implementation_distribution
+
+
 def test_quimb_dependent_imports_skip_when_missing():
     """isotns/tebd pull in quimb; this should SKIP (not fail) without quimb."""
     pytest.importorskip("quimb")

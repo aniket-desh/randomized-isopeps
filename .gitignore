@@ -12,6 +12,7 @@
 !/reports/rmps_column_qr_summary.md
 !/reports/rmps_disentangler_summary.md
 !/reports/hamiltonian_survey_report.md
+!/reports/physics_first_quantum_application_plan.md
 
 # reference papers (kept locally, not published)
 /docs/
@@ -32,6 +33,16 @@
 # python
 __pycache__/
 *.py[cod]
+*.egg-info/
+.pytest_cache/
+/build/
+/dist/
+
+# local phase-one artifacts and nested workspaces (preserved, never cleaned here)
+/claude-code-memories/
+/output/
+/paper/
+/tmp/
 
 # compiled extensions / build artifacts (rebuild via build_incrementalqr.sh)
 *.so
