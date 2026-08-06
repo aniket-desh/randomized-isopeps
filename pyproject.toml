@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rand-isopeps"
 version = "0.1.0"
-description = "Randomized linear algebra inside the block Moses Move of isoPEPS / block-isoPEPS"
+description = "Physics-first imaginary-time isoPEPS with rMPS-sketched column moves"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

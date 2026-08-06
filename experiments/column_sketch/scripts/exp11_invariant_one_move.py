@@ -96,19 +96,9 @@ PREPARATION_FIELDS = IDENTITY_FIELDS + PREPARATION_RESULT_FIELDS
 
 def _dense_hamiltonian(ham, lx, ly):
     """Sparse exact Hamiltonian in PEPS site-index order (small systems only)."""
-    import quimb as qu
-    import scipy.sparse as sp
+    from rand_isopeps.physics import sparse_hamiltonian
 
-    dims = [2] * (lx * ly)
-    h = sp.csr_matrix((2 ** (lx * ly), 2 ** (lx * ly)), dtype=complex)
-    for where, term in ham.terms.items():
-        sites = tuple(where) if isinstance(where[0], tuple) else (where,)
-        inds = tuple(int(i * ly + j) for i, j in sites)
-        # ``LocalHam2D`` stores a fused two-site operator.  ``pkron`` is needed
-        # for vertical bonds whose row-major site indices are non-adjacent;
-        # ``ikron`` only pads a fused operator correctly on contiguous sites.
-        h = h + qu.pkron(term, dims, inds, sparse=True)
-    return h.tocsr()
+    return sparse_hamiltonian(ham, lx, ly)
 
 
 def _scale_safe_dense_state(psi):
@@ -120,20 +110,9 @@ def _scale_safe_dense_state(psi):
     at exponent zero preserves the state direction; the physical norm is then
     tracked in log space.
     """
-    exponent = float(getattr(psi, "exponent", 0.0))
-    if not np.isfinite(exponent):
-        raise RuntimeError(f"tensor-network exponent is non-finite: {exponent}")
-    try:
-        psi.exponent = 0.0
-        vector = np.asarray(psi.to_dense()).reshape(-1)
-    finally:
-        psi.exponent = exponent
-    if not np.all(np.isfinite(vector)):
-        raise RuntimeError("dense state mantissa contains non-finite values")
-    norm = float(np.linalg.norm(vector))
-    if not np.isfinite(norm) or norm <= 0.0:
-        raise RuntimeError(f"dense state mantissa has invalid norm {norm}")
-    return vector / norm, exponent + math.log10(norm)
+    from rand_isopeps.physics import dense_state_vector
+
+    return dense_state_vector(psi)
 
 
 @lru_cache(maxsize=None)

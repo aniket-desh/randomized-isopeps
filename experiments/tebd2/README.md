@@ -1,31 +1,9 @@
-# tebd2
+# Legacy TEBD2 entry point
 
-Placeholder suite for TEBD² (imaginary-time ground-state) experiments. There are
-no experiment scripts here yet.
+The active, fixed-iteration experiment moved to
+`experiments/physics_loop/run.py`. This directory remains only as a pointer for
+older notes that used the `tebd2` name.
 
-The TEBD² imaginary-time ground-state solver itself lives in the package, not in
-this directory, at:
-
-```
-rand_isopeps.real_isotns.tebd2
-```
-
-A back-compat import is also available:
-
-```python
-from rand_isopeps.tebd import tfi_ham, imaginary_time
-```
-
-The solver needs the optional `quimb` dependency (`pip install -e ".[quimb]"`).
-
-## Status
-
-Experiment drivers will be added under `scripts/` later, following the same run
-pattern as the other suites:
-
-```
-pip install -e ".[quimb]"
-python experiments/tebd2/scripts/<name>.py --quick
-```
-
-Outputs would land in `outputs/tebd2/` (gitignored).
+The original preparation API is still available from
+`rand_isopeps.real_isotns.tebd2`; the new symmetric one-iteration API is
+`rand_isopeps.real_isotns.physics_loop.tebd_iteration`.

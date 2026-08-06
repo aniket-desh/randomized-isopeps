@@ -876,88 +876,19 @@ def score_projection_error(
 
 
 def apply_boundary_factorization(psi, j: int, result: BoundedResidualResult, split: str = "right"):
-    """Insert an executed ``Q`` and absorb ``R_C`` into a neighbouring PEPS column.
+    """Compatibility bridge: insert ``Q`` and absorb ``Q* C`` without zip-up.
 
-    This is the state-level bridge used by the invariant one-move benchmark.  It
-    currently handles a boundary orthogonality column, where each ``dout`` leg is
-    exactly the physical leg.  The residual MPO is contracted sitewise into the
-    neighbouring column without approximation; its vertical MPO bonds remain as
-    parallel bonds in the resulting tensor network, so the returned object is an
-    exact ``TensorNetwork2D`` representation of ``Q(Q^*C)`` applied to the input
-    state.  A later absorption backend may zip/compress those bonds, but that loss
-    must be measured separately rather than hidden in this bridge.
+    The state-level implementation now lives beside the real isoTNS code and
+    supports both boundary and interior columns.  Historical one-move callers
+    keep this import and its uncompressed return semantics.
     """
-    try:
-        import quimb.tensor as qtn
-    except ImportError as exc:  # pragma: no cover - optional dependency
-        raise ImportError("apply_boundary_factorization requires quimb") from exc
+    from rand_isopeps.real_isotns.column_bridge import insert_column_factorization
 
-    if split not in ("right", "left"):
-        raise ValueError("split must be 'right' or 'left'")
-    if len(result.q_cores) != psi.Lx:
-        raise ValueError("factorization height does not match the PEPS")
-    j_next = j + 1 if split == "right" else j - 1
-    if not (0 <= j_next < psi.Ly):
-        raise ValueError("residual would be pushed off the lattice")
-    # The direct bridge deliberately starts at a boundary.  Interior columns have
-    # dout = physical x away-bond and require an explicit unfuse map.
-    if (split == "right" and j != 0) or (split == "left" and j != psi.Ly - 1):
-        raise NotImplementedError("direct state bridge currently supports boundary columns only")
-
-    from rand_isopeps.column.from_quimb import _bond, _phys_ind
-
-    def tag(x, y):
-        return psi.site_tag_id.format(x, y)
-
-    out = psi.copy()
-    q_vertical = [qtn.rand_uuid() for _ in range(max(psi.Lx - 1, 0))]
-    r_vertical = [qtn.rand_uuid() for _ in range(max(psi.Lx - 1, 0))]
-    horizontal = [qtn.rand_uuid() for _ in range(psi.Lx)]
-
-    active_old = [psi[tag(x, j)].copy() for x in range(psi.Lx)]
-    neighbour_old = [psi[tag(x, j_next)].copy() for x in range(psi.Lx)]
-    for x, (q_core, r_core, active, neighbour) in enumerate(
-        zip(result.q_cores, result.residual_cores, active_old, neighbour_old)
-    ):
-        phys = _phys_ind(psi, x, j)
-        if q_core.shape[1] != active.ind_size(phys):
-            raise ValueError(
-                "boundary bridge requires Q output_dim == physical_dim; "
-                "extract/factor a boundary centre column"
-            )
-        din = _bond(psi, tag(x, j), tag(x, j_next))
-        if din is None or r_core.shape[2] != active.ind_size(din):
-            raise ValueError("residual input leg does not match the original horizontal bond")
-
-        q_data = q_core
-        q_inds: list[str] = []
-        if x == 0:
-            q_data = np.squeeze(q_data, axis=0)
-        else:
-            q_inds.append(q_vertical[x - 1])
-        q_inds.extend([phys, horizontal[x]])
-        if x == psi.Lx - 1:
-            q_data = np.squeeze(q_data, axis=-1)
-        else:
-            q_inds.append(q_vertical[x])
-        q_tensor = qtn.Tensor(q_data, inds=q_inds, tags=active.tags)
-
-        r_data = r_core
-        r_inds: list[str] = []
-        if x == 0:
-            r_data = np.squeeze(r_data, axis=0)
-        else:
-            r_inds.append(r_vertical[x - 1])
-        r_inds.extend([horizontal[x], din])
-        if x == psi.Lx - 1:
-            r_data = np.squeeze(r_data, axis=-1)
-        else:
-            r_inds.append(r_vertical[x])
-        r_tensor = qtn.Tensor(r_data, inds=r_inds)
-        absorbed = r_tensor @ neighbour
-
-        out.delete(active.tags)
-        out.delete(neighbour.tags)
-        out |= q_tensor
-        out |= absorbed
-    return out
+    return insert_column_factorization(
+        psi,
+        j,
+        result.q_cores,
+        result.residual_cores,
+        split=split,
+        inplace=False,
+    )

@@ -247,7 +247,8 @@ def split_3d_iso(T, left_inds, right_inds, up_inds, chi, eta, Ndis, cutoff, cfg=
 # ------------------------------- the Moses Move ------------------------------ #
 
 def moses_move(psi, j, chi, eta, cutoff, Ndis,
-               orientation="col", sweep="up", split="right", renorm=True, rand=None, stats=None):
+               orientation="col", sweep="up", split="right", renorm=True, rand=None, stats=None,
+               absorb_max_bond=None, absorb_cutoff=None):
     """Moses move on column/row ``j`` of a quimb PEPS (modifies ``psi`` in place).
 
     Sweeps the column splitting each site into an isometric ring (split_3d_iso),
@@ -305,7 +306,14 @@ def moses_move(psi, j, chi, eta, cutoff, Ndis,
     # absorb the R-column into the neighbor column (sideways MPO-MPS compression)
     RX = psi.select(tags=[rot.y_tag(j_next)], which="all")
     new_col_tags = [rot.site_tag(i, j_next) for i in sweep_inds]
-    new_col = qtn.tensor_network_1d_compress(RX, site_tags=new_col_tags, sweep_reverse=True, method="zipup")
+    new_col = qtn.tensor_network_1d_compress(
+        RX,
+        site_tags=new_col_tags,
+        sweep_reverse=True,
+        method="zipup",
+        max_bond=absorb_max_bond,
+        cutoff=cutoff if absorb_cutoff is None else absorb_cutoff,
+    )
     psi.delete([rot.y_tag(j_next)])
     psi |= new_col
 

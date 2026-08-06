@@ -15,9 +15,10 @@ into the bond terms), ``PEPS.gate_`` (the local gate + truncating split), and
 every SVD in the Moses-Move re-canonicalization, so the randomized linear algebra
 is exercised inside a real ground-state calculation.
 
-Minimal by design: 1st/2nd-order Trotter via alternating left/right sweeps;
-single state (no block index). Verified to lower the energy toward the exact
-(ED) ground state of the 2D transverse-field Ising model on small lattices.
+This module preserves the original first-order alternating-sweep preparation
+API. New experiments use :func:`rand_isopeps.real_isotns.physics_loop.tebd_iteration`,
+whose forward half sweep followed by its exact reverse is explicitly
+second-order. Single state only (no block index).
 """
 
 from __future__ import annotations
@@ -135,7 +136,7 @@ def imaginary_time(psi, ham, taus, steps, chi, eta, cutoff=1e-10, Ndis=10,
     """Imaginary-time TEBD^2 ground-state search (modifies ``psi`` in place).
 
     ``taus`` is a single step size or a list of (tau, n_steps) stages (anneal the
-    step down for accuracy). Alternates right/left sweeps (2nd-order Trotter).
+    step down for accuracy). Alternates first-order right/left sweeps.
     Returns ``(psi, energies)`` where ``energies`` is the recorded <H> trajectory.
     """
     schedule = [(taus, steps)] if isinstance(taus, (int, float)) else list(taus)
