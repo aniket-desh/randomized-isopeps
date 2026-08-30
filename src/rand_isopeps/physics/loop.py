@@ -1,10 +1,10 @@
-"""The single fixed-iteration loop used by every phase-two experiment."""
+"""the single fixed-iteration loop used by every phase-two experiment."""
 
 from __future__ import annotations
 
 
 def run_iterations(state, *, iterations: int, update, measure, on_record=None):
-    """Run ``state = update(state, k)`` exactly ``iterations`` times.
+    """run ``state = update(state, k)`` exactly ``iterations`` times.
 
     ``update`` returns ``(state, update_metrics)`` and ``measure`` returns a
     serializable dictionary. The history includes iteration zero.

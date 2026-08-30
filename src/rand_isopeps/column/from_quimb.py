@@ -33,6 +33,12 @@ from __future__ import annotations
 
 import numpy as np
 
+from rand_isopeps.backend import (
+    array_namespace,
+    asarray as backend_asarray,
+    svdvals as backend_svdvals,
+    to_numpy,
+)
 from rand_isopeps.column.operator import (
     ColumnOperator,
     dense_column_nbytes,
@@ -93,7 +99,7 @@ def from_quimb_column(psi, j, split="right", normalize=True):
         down_ix = _bond(psi, tag(x, j), tag(x + 1, j)) if x + 1 < Lx else None
 
         order = [ix for ix in (up_ix, phys_ix, away_ix, din_ix, down_ix) if ix is not None]
-        arr = np.asarray(t.transpose(*order).data)
+        arr = backend_asarray(t.transpose(*order).data)
         dims = dict(
             up=t.ind_size(up_ix) if up_ix else 1,
             phys=t.ind_size(phys_ix),
@@ -124,7 +130,9 @@ def _isometry_defect_mf(op, *, n_probes=8, chi_score=4, seed=0):
     via the transfer-matrix MPS norm and ``||C omega||^2`` from the small ``n_out``-length
     output vector -- the ``prod(r_i)`` dense vector is never formed."""
     rng = np.random.default_rng(seed)
-    complex_valued = np.iscomplexobj(op.cores[0])
+    complex_valued = np.issubdtype(
+        np.dtype(op.cores[0].dtype), np.complexfloating
+    )
     ratios = []
     for _ in range(n_probes):
         w = rmps_cores(op.input_dims, chi_score, rng, complex_valued=complex_valued)
@@ -132,8 +140,17 @@ def _isometry_defect_mf(op, *, n_probes=8, chi_score=4, seed=0):
         if wn <= 0:
             continue
         cw = mps_to_vector(op.matvec_mps(w))
-        ratios.append(abs(float(np.vdot(cw, cw).real) / wn - 1.0))
+        xp = array_namespace(cw)
+        norm_sq = float(to_numpy(xp.vdot(cw, cw).real))
+        ratios.append(abs(norm_sq / wn - 1.0))
     return float(np.median(ratios)) if ratios else 0.0
+
+
+def _center_probe_seed(column: int, split: str) -> int:
+    """return a process-independent seed for one boundary probe."""
+    if split not in {"left", "right"}:
+        raise ValueError(f"unknown column split: {split!r}")
+    return 2 * int(column) + int(split == "left")
 
 
 def find_center_column(psi, tol=1e-04):
@@ -168,11 +185,15 @@ def find_center_column(psi, tol=1e-04):
         # the spread) once the dense column would blow the memory budget.
         peak = 3.0 * dense_column_nbytes(op.n_out, op.n_in)
         if peak <= DEFAULT_DENSE_MAX_GB * (1024 ** 3):
-            s = np.linalg.svd(op.materialize(), compute_uv=False)
+            s = backend_svdvals(op.materialize())
             s = s[s > 0]
-            scores[(j, split)] = float(1.0 - s[-1] / s[0]) if s.size else 0.0
+            scores[(j, split)] = (
+                float(to_numpy(1.0 - s[-1] / s[0])) if s.size else 0.0
+            )
         else:
-            scores[(j, split)] = _isometry_defect_mf(op, seed=hash((j, split)) & 0xFFFF)
+            scores[(j, split)] = _isometry_defect_mf(
+                op, seed=_center_probe_seed(j, split)
+            )
     (jc, split), score = max(scores.items(), key=lambda kv: kv[1])
     if score < tol:
         raise ValueError(

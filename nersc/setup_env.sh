@@ -1,21 +1,13 @@
 #!/bin/bash
-# One-time environment setup for randomized-isopeps on NERSC Perlmutter.
-#
-# RUN ON A LOGIN NODE (compute nodes have no outbound internet, so pip/conda must
-# happen here). From the repo root:
-#
-#     PROJECT=m4926 bash nersc/setup_env.sh
-#
-# Builds the conda env on the *Common* filesystem (fast parallel FS + big quota;
-# a torch/quimb env would blow your $HOME quota). Every job script then just does
-#     module load python && source activate "$ENV_PREFIX"
+# create the shared environment on a login node, where pip and conda have network access.
 set -euo pipefail
 
 PROJECT="${PROJECT:?set PROJECT to your NERSC project code, e.g. m1234}"
 ENV_PREFIX="/global/common/software/${PROJECT}/rand-isopeps-env"
 
-module load python                                    # NERSC's Anaconda base
-# Load conda's shell functions so `conda activate` works in this non-interactive script.
+module load python cudatoolkit/12.9                   # nersc's conda base and cuda 12
+# load conda's shell functions for this non-interactive script.
+# shellcheck disable=SC1091
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
 if [ ! -d "$ENV_PREFIX" ]; then
@@ -24,9 +16,8 @@ if [ ! -d "$ENV_PREFIX" ]; then
 fi
 conda activate "$ENV_PREFIX"
 
-# Editable install of the package. The ".[quimb]" extra pulls quimb+autoray for the
-# real isoTNS block Moses-move experiments; drop it if you only need synthetic kernels.
-pip install -e ".[quimb]"
+# install quimb and the cuda 12 cupy wheel on the login node.
+pip install -e ".[quimb,gpu,riemannian]"
 
 echo
 echo "=== env ready ==="

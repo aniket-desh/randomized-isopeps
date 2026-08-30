@@ -21,6 +21,7 @@
 # Curated, relevant plots are committed under each suite's figures/ dir instead,
 # so collaborators see the results without versioning data or every run.
 **/outputs/
+/experiments/paper_campaign/manifests/
 
 # raw data pulled back from NERSC by nersc/pull_data.sh (never versioned)
 /nersc-data/

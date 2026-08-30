@@ -18,10 +18,11 @@ dependencies = [
 [project.optional-dependencies]
 # real quimb isoTNS Moses Move + TEBD2 (rand_isopeps.real_isotns.*)
 quimb = ["quimb", "autoray"]
-# Riemannian disentangler (rand_isopeps.moses.disentangler: disentangle_riemannian)
+# riemannian-renyi moses disentangler
 riemannian = ["pymanopt"]
+gpu = ["cupy-cuda12x"]
 # convenience: everything
-all = ["quimb", "autoray", "pymanopt"]
+all = ["quimb", "autoray", "pymanopt", "cupy-cuda12x"]
 test = ["pytest"]
 
 [tool.setuptools.packages.find]

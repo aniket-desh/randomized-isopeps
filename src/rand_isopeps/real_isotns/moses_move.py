@@ -153,15 +153,84 @@ def my_split(T, left_inds, absorb, chi_max, cutoff=1e-10, get="tensors",
 
 # ----------------------------- the disentangler ------------------------------ #
 
-def disentangle(X, dis_bonds, svd_bonds, eta, cutoff=1e-6, Ndis=30, cfg=None, stats=None):
-    """Alternating-minimization disentangler (Dektor / Wei et al.).
+def _riemannian_disentangler(X, dis_bonds, svd_bonds, maxiter: int):
+    """Minimize Renyi-1/2 entropy on the real orthogonal gauge."""
+    try:
+        import pymanopt
+        from pymanopt.manifolds import SpecialOrthogonalGroup
+        from pymanopt.optimizers import ConjugateGradient
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ImportError("riemannian disentangling requires pymanopt") from exc
+    dis_bonds = tuple(dis_bonds)
+    other_bonds = tuple(index for index in X.inds if index not in dis_bonds)
+    ordered = X.transpose(*dis_bonds, *other_bonds)
+    dis_dims = tuple(ordered.ind_size(index) for index in dis_bonds)
+    other_dims = tuple(ordered.ind_size(index) for index in other_bonds)
+    data = np.asarray(ordered.data)
+    if np.iscomplexobj(data):
+        scale = max(float(np.linalg.norm(data)), np.finfo(float).tiny)
+        if float(np.linalg.norm(data.imag)) > 1e-12 * scale:
+            raise ValueError("riemannian disentangling requires a real block state")
+        data = data.real
+    x = np.asarray(data, dtype=float).reshape(qu.prod(dis_dims), -1)
+    all_bonds = (*dis_bonds, *other_bonds)
+    left_axes = tuple(all_bonds.index(index) for index in svd_bonds)
+    right_axes = tuple(axis for axis in range(len(all_bonds)) if axis not in left_axes)
+    permutation = (*left_axes, *right_axes)
+    inverse_permutation = tuple(np.argsort(permutation))
+    left_size = int(
+        np.prod([ordered.ind_size(all_bonds[axis]) for axis in left_axes])
+    )
 
-    Optimizes a unitary Q on ``dis_bonds`` that minimizes the rank-``eta``
-    truncation tail across ``svd_bonds``: rank-eta truncation of A(QX), then an
-    orthogonal Procrustes update Q = U V. ``cfg.disentangler_inner`` randomizes the
-    inner rank-eta search SVD and ``cfg.svd2`` the final second SVD; the Procrustes
-    gauge update stays an exact unitary. A fresh sketch is drawn each iteration
-    (the reliable mode).
+    def cut_forward(q):
+        tensor = (q @ x).reshape(*dis_dims, *other_dims)
+        return tensor.transpose(permutation).reshape(left_size, -1)
+
+    def cut_inverse(matrix):
+        shape = tuple(ordered.ind_size(all_bonds[axis]) for axis in permutation)
+        tensor = matrix.reshape(shape).transpose(inverse_permutation)
+        return tensor.reshape(x.shape)
+
+    frobenius = max(float(np.linalg.norm(x)), np.finfo(float).tiny)
+    manifold = SpecialOrthogonalGroup(x.shape[0])
+
+    @pymanopt.function.numpy(manifold)
+    def cost(q):
+        singular = np.linalg.svd(cut_forward(q), compute_uv=False)
+        return 2.0 * np.log(max(float(np.sum(singular)), np.finfo(float).tiny) / frobenius)
+
+    @pymanopt.function.numpy(manifold)
+    def euclidean_gradient(q):
+        matrix = cut_forward(q)
+        left, singular, right = np.linalg.svd(matrix, full_matrices=False)
+        nuclear = max(float(np.sum(singular)), np.finfo(float).tiny)
+        return (2.0 / nuclear) * cut_inverse(left @ right) @ x.T
+
+    problem = pymanopt.Problem(
+        manifold, cost, euclidean_gradient=euclidean_gradient
+    )
+    result = ConjugateGradient(max_iterations=int(maxiter), verbosity=0).run(
+        problem, initial_point=np.eye(x.shape[0])
+    )
+    return np.asarray(result.point)
+
+
+def disentangle(
+    X,
+    dis_bonds,
+    svd_bonds,
+    eta,
+    cutoff=1e-6,
+    Ndis=30,
+    cfg=None,
+    stats=None,
+    optimizer="altmin",
+):
+    """Optimize the tensor-ring gauge, then compute its rank-``eta`` split.
+
+    ``altmin`` minimizes the truncation tail by alternating a rank truncation
+    with an exact Procrustes update. ``riemannian_renyi`` follows the block-isoPEPS
+    experiments by minimizing Renyi-1/2 entropy on the real orthogonal group.
     """
     cfg = _as_config(cfg)
     dims = [X.ind_size(b) for b in dis_bonds]
@@ -173,18 +242,25 @@ def disentangle(X, dis_bonds, svd_bonds, eta, cutoff=1e-6, Ndis=30, cfg=None, st
     Q = qtn.Tensor(data=eye, inds=list(dis_bonds) + bonds_out, tags=())
 
     err = 0.0
-    for _ in range(Ndis):
-        QX = Q @ X
-        QX = QX.reindex({ix: ix[:-1] if ix.endswith("*") else ix for ix in QX.inds})
-        U, R, err = my_split(QX, svd_bonds, -1, eta, cutoff=cutoff,
-                             ltags=QX.tags, rtags=QX.tags, rand=cfg.disentangler_inner,
-                             stage="disentangler_inner", stats=stats)
-        M = (U @ R).reindex({ix: ix + "*" for ix in dis_bonds})
-        MX = M @ X.H
-        Uq, _, Vq = MX.split(left_inds=dis_bonds, absorb=None)  # exact gauge update
-        Q = Uq @ Vq
-        if abs(err) < cutoff:
-            break
+    if optimizer == "riemannian_renyi":
+        if Ndis > 0:
+            q = _riemannian_disentangler(X, dis_bonds, svd_bonds, Ndis)
+            Q.modify(data=q.T.reshape((*dims, *dims)))
+    elif optimizer == "altmin":
+        for _ in range(Ndis):
+            QX = Q @ X
+            QX = QX.reindex({ix: ix[:-1] if ix.endswith("*") else ix for ix in QX.inds})
+            U, R, err = my_split(QX, svd_bonds, -1, eta, cutoff=cutoff,
+                                 ltags=QX.tags, rtags=QX.tags, rand=cfg.disentangler_inner,
+                                 stage="disentangler_inner", stats=stats)
+            M = (U @ R).reindex({ix: ix + "*" for ix in dis_bonds})
+            MX = M @ X.H
+            Uq, _, Vq = MX.split(left_inds=dis_bonds, absorb=None)
+            Q = Uq @ Vq
+            if abs(err) < cutoff:
+                break
+    else:
+        raise ValueError(f"unknown disentangler optimizer: {optimizer!r}")
 
     QX = Q @ X
     QX = QX.reindex({ix: ix[:-1] if ix.endswith("*") else ix for ix in QX.inds})
@@ -213,7 +289,19 @@ def split_dim(ds: int, eta: int | None = None, chi: int | None = None) -> tuple[
 
 # --------------------------- the local ring split ---------------------------- #
 
-def split_3d_iso(T, left_inds, right_inds, up_inds, chi, eta, Ndis, cutoff, cfg=None, stats=None):
+def split_3d_iso(
+    T,
+    left_inds,
+    right_inds,
+    up_inds,
+    chi,
+    eta,
+    Ndis,
+    cutoff,
+    cfg=None,
+    stats=None,
+    disentangler="altmin",
+):
     """Split an active tensor into the isometric 3-tensor ring (Moses local step).
 
     First SVD to bond chi*eta (the isometry L + residual UR), then disentangle +
@@ -236,7 +324,17 @@ def split_3d_iso(T, left_inds, right_inds, up_inds, chi, eta, Ndis, cutoff, cfg=
     svd_bonds = up_inds.copy()
     svd_bonds.add(new_inds[1])
 
-    Q, U, R, err1 = disentangle(UR, dis_bonds, svd_bonds, eta, Ndis=Ndis, cfg=cfg, stats=stats)
+    Q, U, R, err1 = disentangle(
+        UR,
+        dis_bonds,
+        svd_bonds,
+        eta,
+        cutoff=cutoff,
+        Ndis=Ndis,
+        cfg=cfg,
+        stats=stats,
+        optimizer=disentangler,
+    )
     L = L @ Q.H
     L = L.reindex({ix: ix[:-1] if ix.endswith("*") else ix for ix in L.inds})
 
@@ -248,14 +346,16 @@ def split_3d_iso(T, left_inds, right_inds, up_inds, chi, eta, Ndis, cutoff, cfg=
 
 def moses_move(psi, j, chi, eta, cutoff, Ndis,
                orientation="col", sweep="up", split="right", renorm=True, rand=None, stats=None,
-               absorb_max_bond=None, absorb_cutoff=None):
+               absorb_max_bond=None, absorb_cutoff=None, block_ind=None,
+               disentangler="altmin"):
     """Moses move on column/row ``j`` of a quimb PEPS (modifies ``psi`` in place).
 
     Sweeps the column splitting each site into an isometric ring (split_3d_iso),
     contracting the upward carrier U into the site above, peeling the residual R
     to the neighbor column, then absorbing the R-column with a zip-up compression.
     ``rand=RandSVD(...)`` randomizes every SVD in the move. Returns the per-site
-    (disentangler, first-SVD) truncation errors.
+    (disentangler, first-SVD) truncation errors. If ``block_ind`` is supplied,
+    it is carried to the far end by U and then into the neighbor through R.
     """
     cfg = _as_config(rand)
     if orientation == "col":
@@ -268,6 +368,11 @@ def moses_move(psi, j, chi, eta, cutoff, Ndis,
     R = qtn.Tensor(data=0)
     sweep_inds = list(rot.sweep)
     mm_errs = None
+    if block_ind is not None:
+        owners = [tensor for tensor in psi.tensors if block_ind in tensor.inds]
+        start = rot.site_tag(sweep_inds[0], j)
+        if len(owners) != 1 or block_ind not in psi[start].inds:
+            raise ValueError("the block index must start at the incoming end of the column")
 
     for idx in range(len(sweep_inds) - 1):
         i, i_next = sweep_inds[idx], sweep_inds[idx + 1]
@@ -277,10 +382,13 @@ def moses_move(psi, j, chi, eta, cutoff, Ndis,
 
         up_bonds = psi[site].bonds(psi[site_up])
         right_bonds = psi[site].bonds(psi[site_right]).union(psi[site].bonds(R))
+        if block_ind is not None:
+            up_bonds.add(block_ind)
 
         L, U, R, errs = split_3d_iso(psi[site], left_inds=None, right_inds=right_bonds,
                                      up_inds=up_bonds, chi=chi, eta=eta, Ndis=Ndis,
-                                     cutoff=cutoff, cfg=cfg, stats=stats)
+                                     cutoff=cutoff, cfg=cfg, stats=stats,
+                                     disentangler=disentangler)
         mm_errs = errs if mm_errs is None else np.concatenate([mm_errs, errs], axis=1)
 
         U.drop_tags()
@@ -293,6 +401,8 @@ def moses_move(psi, j, chi, eta, cutoff, Ndis,
     i = sweep_inds[-1]
     site = rot.site_tag(i, j)
     right_bonds = psi[site].bonds(psi[rot.site_tag(i, j_next)]).union(psi[site].bonds(R))
+    if block_ind is not None:
+        right_bonds.add(block_ind)
     L, R, err0 = my_split(psi[site], None, 1, chi * eta, cutoff=cutoff,
                           right_inds=right_bonds, ltags=psi[site].tags, rtags=psi[site].tags,
                           rand=cfg.svd1, stage="svd1", stats=stats)
@@ -326,7 +436,7 @@ def moses_move(psi, j, chi, eta, cutoff, Ndis,
 
 
 def random_isotns(Lx, Ly, bond=2, phys=2, chi=64, eta=64, cutoff=1e-10, Ndis=20,
-                  seed=None, rand=None, stats=None):
+                  seed=None, rand=None, stats=None, disentangler="altmin"):
     """Build a random isoTNS by Moses-sweeping a random quimb PEPS to canonical
     form (mirrors Dektor's ``rand_isoTNS``). ``rand`` randomizes the sweep's SVDs.
     Returns the canonicalized PEPS."""
@@ -335,6 +445,6 @@ def random_isotns(Lx, Ly, bond=2, phys=2, chi=64, eta=64, cutoff=1e-10, Ndis=20,
     for j in range(Ly - 1, 0, -1):
         moses_move(psi, j, chi, eta, cutoff, Ndis, orientation="col",
                    sweep=("down" if j % 2 == 0 else "up"), split="left", renorm=False,
-                   rand=rand, stats=stats)
+                   rand=rand, stats=stats, disentangler=disentangler)
     psi.canonize_column(0, "down")
     return psi

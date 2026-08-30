@@ -38,8 +38,8 @@ after="$(git rev-parse HEAD)"
 # library code against new scripts. --no-deps makes it a fast (~s) idempotent re-link; full
 # dependency resolution only when pyproject.toml actually moved.
 if [ "$before" != "$after" ] && git diff --name-only "$before" "$after" | grep -qx 'pyproject.toml'; then
-  echo "== pyproject.toml changed -> full pip install -e '.[quimb]' =="
-  pip install -e ".[quimb]"
+  echo "== pyproject.toml changed -> refresh quimb, gpu, and riemannian extras =="
+  pip install -e ".[quimb,gpu,riemannian]"
 else
   pip install -e . --no-deps --quiet
 fi

@@ -8,6 +8,7 @@ from typing import Literal
 
 import numpy as np
 
+from rand_isopeps.backend import array_namespace, to_numpy
 from rand_isopeps.linalg.randomized_svd import SketchKind, rsvd_truncate, svd_truncate
 from rand_isopeps.synthetic.tensors import random_complex
 
@@ -84,13 +85,16 @@ def random_mpo(
 def apply_mpo_to_mps(mpo: list[np.ndarray], mps: list[np.ndarray]) -> list[np.ndarray]:
     if len(mpo) != len(mps):
         raise ValueError("mpo and mps lengths must match")
+    xp = array_namespace(mpo, mps)
     product = []
     for w, a in zip(mpo, mps):
+        w = xp.asarray(w)
+        a = xp.asarray(a)
         ml, dout, din, mr = w.shape
         dl, d, dr = a.shape
         if din != d:
             raise ValueError("mpo input physical dimension must match mps physical dimension")
-        site = np.einsum("axyb,lyr->laxrb", w, a, optimize=True)
+        site = xp.einsum("axyb,lyr->laxrb", w, a, optimize=True)
         product.append(site.reshape(dl * ml, dout, dr * mr))
     return product
 
@@ -106,7 +110,8 @@ def apply_mpo_adjoint_to_mps(mpo: list[np.ndarray], mps: list[np.ndarray]) -> li
     legs (``din``) -- the access-model form of ``C^* y`` with no ``prod(din)``
     dense vector ever formed.
     """
-    adjoint = [np.conj(w).transpose(0, 2, 1, 3) for w in mpo]
+    xp = array_namespace(mpo, mps)
+    adjoint = [xp.asarray(w).conj().transpose(0, 2, 1, 3) for w in mpo]
     return apply_mpo_to_mps(adjoint, mps)
 
 
@@ -116,10 +121,12 @@ def mps_norm_sq(mps: list[np.ndarray]) -> float:
     Cost ``O(L * d * bond^3)`` and, crucially, never forms the ``prod(d_i)`` dense
     vector -- the matrix-free norm used to score/normalize probes over the large
     input leg space."""
-    env = np.ones((1, 1), dtype=np.result_type(*[s.dtype for s in mps]))
+    xp = array_namespace(mps)
+    env = xp.ones((1, 1), dtype=xp.result_type(*[s.dtype for s in mps]))
     for a in mps:  # a: (dl, d, dr)
-        env = np.einsum("ab,aic,bid->cd", env, a.conj(), a, optimize=True)
-    return float(np.abs(env[0, 0]))
+        a = xp.asarray(a)
+        env = xp.einsum("ab,aic,bid->cd", env, a.conj(), a, optimize=True)
+    return float(to_numpy(xp.abs(env[0, 0])))
 
 
 def max_mps_bond(mps: list[np.ndarray]) -> int:
@@ -127,9 +134,10 @@ def max_mps_bond(mps: list[np.ndarray]) -> int:
 
 
 def mps_to_vector(mps: list[np.ndarray]) -> np.ndarray:
-    state = mps[0][0, :, :]
+    xp = array_namespace(mps)
+    state = xp.asarray(mps[0])[0, :, :]
     for site in mps[1:]:
-        state = np.tensordot(state, site, axes=(-1, 0))
+        state = xp.tensordot(state, xp.asarray(site), axes=(-1, 0))
         state = state.reshape(-1, state.shape[-1])
     return state[:, 0]
 
@@ -167,10 +175,13 @@ def compress_mps(
 
 
 def relative_vector_error(exact: np.ndarray, approx: np.ndarray) -> float:
-    denom = np.linalg.norm(exact)
-    if denom == 0:
-        return float(np.linalg.norm(approx))
-    return float(np.linalg.norm(exact - approx) / denom)
+    xp = array_namespace(exact, approx)
+    exact = xp.asarray(exact)
+    approx = xp.asarray(approx)
+    denom = xp.linalg.norm(exact)
+    if float(to_numpy(denom)) == 0.0:
+        return float(to_numpy(xp.linalg.norm(approx)))
+    return float(to_numpy(xp.linalg.norm(exact - approx) / denom))
 
 
 def run_absorption_case(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
+from rand_isopeps.backend import asarray as backend_asarray
 
 
 def _tag(psi, x: int, y: int) -> str:
@@ -86,36 +86,36 @@ def insert_column_factorization(
         if q_core.shape[1] != phys_dim * away_dim:
             raise ValueError("Q output cannot be unfused into physical and away-bond legs")
 
-        q_data = np.asarray(q_core).reshape(
+        q_data = backend_asarray(q_core, like=active.data).reshape(
             q_core.shape[0], phys_dim, away_dim, q_core.shape[2], q_core.shape[3]
         )
         q_inds: list[str] = []
         if x == 0:
-            q_data = np.squeeze(q_data, axis=0)
+            q_data = q_data.squeeze(axis=0)
         else:
             q_inds.append(q_vertical[x - 1])
         q_inds.append(phys)
         if away is None:
             away_axis = 1 if x == 0 else 2
-            q_data = np.squeeze(q_data, axis=away_axis)
+            q_data = q_data.squeeze(axis=away_axis)
         else:
             q_inds.append(away)
         q_inds.append(horizontal[x])
         if x == source.Lx - 1:
-            q_data = np.squeeze(q_data, axis=-1)
+            q_data = q_data.squeeze(axis=-1)
         else:
             q_inds.append(q_vertical[x])
         q_tensor = qtn.Tensor(q_data, inds=q_inds, tags=active.tags)
 
-        r_data = np.asarray(r_core)
+        r_data = backend_asarray(r_core, like=neighbour.data)
         r_inds: list[str] = []
         if x == 0:
-            r_data = np.squeeze(r_data, axis=0)
+            r_data = r_data.squeeze(axis=0)
         else:
             r_inds.append(r_vertical[x - 1])
         r_inds.extend([horizontal[x], toward])
         if x == source.Lx - 1:
-            r_data = np.squeeze(r_data, axis=-1)
+            r_data = r_data.squeeze(axis=-1)
         else:
             r_inds.append(r_vertical[x])
         r_tensor = qtn.Tensor(r_data, inds=r_inds)

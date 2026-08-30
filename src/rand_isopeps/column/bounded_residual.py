@@ -34,11 +34,19 @@ from time import perf_counter
 import tracemalloc
 
 import numpy as np
-import scipy.linalg as la
 
+from rand_isopeps.backend import (
+    array_namespace,
+    asarray as backend_asarray,
+    svd as backend_svd,
+    svdvals as backend_svdvals,
+    synchronize,
+    to_numpy,
+)
 from rand_isopeps.column.operator import ColumnOperator
 from rand_isopeps.compression.mpo_mps_absorb import max_mps_bond
 from rand_isopeps.linalg.rmps_sketch import rmps_cores
+from rand_isopeps.linalg.sketches import range_sample
 from rand_isopeps.moses.disentangler import disentangle_altmin, unitary_defect
 
 
@@ -211,13 +219,18 @@ def block_mps_to_matrix(cores: list[np.ndarray]) -> np.ndarray:
     """Materialize a block MPS whose final right boundary labels its columns."""
     if not cores or cores[0].shape[0] != 1:
         raise ValueError("block MPS must have a unit left boundary")
-    state = cores[0][0]
+    xp = array_namespace(cores)
+    state = xp.asarray(cores[0])[0]
     for core in cores[1:]:
         if state.shape[-1] != core.shape[0]:
             raise ValueError("block-MPS bond mismatch")
-        state = np.tensordot(state, core, axes=(-1, 0))
+        state = xp.tensordot(state, xp.asarray(core), axes=(-1, 0))
         state = state.reshape(-1, state.shape[-1])
     return state
+
+
+def _is_complex(value) -> bool:
+    return np.issubdtype(np.dtype(value.dtype), np.complexfloating)
 
 
 def _contract_flops(output_entries: int, summed_entries: int, complex_valued: bool) -> int:
@@ -233,7 +246,7 @@ def _mpo_mps_flops(mpo: list[np.ndarray], mps: list[np.ndarray]) -> int:
         dl, _, dr = map(int, a.shape)
         total += _contract_flops(
             dl * ml * dout * dr * mr, din,
-            np.iscomplexobj(w) or np.iscomplexobj(a),
+            _is_complex(w) or _is_complex(a),
         )
     return total
 
@@ -244,7 +257,7 @@ def _mps_inner_flops(a: list[np.ndarray], b: list[np.ndarray]) -> int:
     for aa, bb in zip(a, b):
         right_a, right_b = int(aa.shape[2]), int(bb.shape[2])
         physical = int(aa.shape[1])
-        complex_valued = np.iscomplexobj(aa) or np.iscomplexobj(bb)
+        complex_valued = _is_complex(aa) or _is_complex(bb)
         # Match the cheaper of the two pairwise paths used by optimized einsum,
         # rather than charging the exponentially worse simultaneous contraction.
         via_a = _contract_flops(
@@ -282,14 +295,18 @@ def block_mps_inner(a: list[np.ndarray], b: list[np.ndarray]) -> complex:
     """Frobenius inner product of two block MPSs with the same column boundary."""
     if len(a) != len(b):
         raise ValueError("block MPS lengths must match")
-    env = np.ones((1, 1), dtype=np.result_type(*a, *b))
+    xp = array_namespace(a, b)
+    dtype = xp.result_type(*[core.dtype for core in (*a, *b)])
+    env = xp.ones((1, 1), dtype=dtype)
     for aa, bb in zip(a, b):
         if aa.shape[1] != bb.shape[1]:
             raise ValueError("block MPS physical dimensions must match")
-        env = np.einsum("ab,aic,bid->cd", env, aa.conj(), bb, optimize=True)
+        aa = xp.asarray(aa)
+        bb = xp.asarray(bb)
+        env = xp.einsum("ab,aic,bid->cd", env, aa.conj(), bb, optimize=True)
     if env.shape[0] != env.shape[1]:
         raise ValueError("block MPS column boundaries must match")
-    return complex(np.trace(env))
+    return complex(to_numpy(xp.trace(env)))
 
 
 def block_mps_relative_error(exact: list[np.ndarray], approx: list[np.ndarray]) -> float:
@@ -301,7 +318,10 @@ def block_mps_relative_error(exact: list[np.ndarray], approx: list[np.ndarray]) 
     if elements <= 2_000_000:
         a = block_mps_to_matrix(exact)
         b = block_mps_to_matrix(approx)
-        return float(np.linalg.norm(a - b) / max(np.linalg.norm(a), 1e-300))
+        xp = array_namespace(a, b)
+        numerator = xp.linalg.norm(a - b)
+        denominator = float(to_numpy(xp.linalg.norm(a)))
+        return float(to_numpy(numerator)) / max(denominator, 1e-300)
     ne = float(block_mps_inner(exact, exact).real)
     na = float(block_mps_inner(approx, approx).real)
     ov = block_mps_inner(exact, approx)
@@ -319,7 +339,7 @@ def dense_to_block_mps(y: np.ndarray, out_dims: tuple[int, ...]) -> list[np.ndar
     left = 1
     for o in out_dims[:-1]:
         mat = work.reshape(left * int(o), -1)
-        u, s, vh = la.svd(mat, full_matrices=False, check_finite=False, lapack_driver="gesdd")
+        u, s, vh = backend_svd(mat)
         rank = int(s.shape[0])
         cores.append(u.reshape(left, int(o), rank))
         work = s[:, None] * vh
@@ -337,16 +357,16 @@ def _right_canonicalize_block_mps(cores: list[np.ndarray]) -> list[np.ndarray]:
     the corresponding cut of the full sampled matrix.  This is what makes the
     ``kappa=1`` path reduce to the representation-independent TT-SVD sweep.
     """
-    work = [np.array(core, copy=True) for core in cores]
+    xp = array_namespace(cores)
+    work = [xp.asarray(core).copy() for core in cores]
     for i in range(len(work) - 1, 0, -1):
         left, phys, right = map(int, work[i].shape)
         mat = work[i].reshape(left, phys * right)
-        u, singular, vh = la.svd(mat, full_matrices=False, check_finite=False,
-                                 lapack_driver="gesdd")
+        u, singular, vh = backend_svd(mat)
         rank = int(singular.shape[0])
         work[i] = vh.reshape(rank, phys, right)
         transfer = u * singular
-        work[i - 1] = np.tensordot(work[i - 1], transfer, axes=(2, 0))
+        work[i - 1] = xp.tensordot(work[i - 1], transfer, axes=(2, 0))
     return work
 
 
@@ -358,7 +378,8 @@ def _stack_mps_columns(columns: list[list[np.ndarray]], scale: float = 1.0) -> l
     lx = len(columns[0])
     if any(len(col) != lx for col in columns):
         raise ValueError("all sampled MPS columns must have the same length")
-    dtype = np.result_type(*[core.dtype for col in columns for core in col])
+    xp = array_namespace(columns)
+    dtype = xp.result_type(*[core.dtype for col in columns for core in col])
     out: list[np.ndarray] = []
     for i in range(lx):
         phys = int(columns[0][i].shape[1])
@@ -367,14 +388,14 @@ def _stack_mps_columns(columns: list[list[np.ndarray]], scale: float = 1.0) -> l
         left_sizes = [int(col[i].shape[0]) for col in columns]
         right_sizes = [int(col[i].shape[2]) for col in columns]
         if i == 0:
-            core = np.zeros((1, phys, sum(right_sizes)), dtype=dtype)
+            core = xp.zeros((1, phys, sum(right_sizes)), dtype=dtype)
             off = 0
             for col, width in zip(columns, right_sizes):
                 core[0, :, off:off + width] = col[i][0]
                 off += width
             core *= scale
         elif i == lx - 1:
-            core = np.zeros((sum(left_sizes), phys, ell), dtype=dtype)
+            core = xp.zeros((sum(left_sizes), phys, ell), dtype=dtype)
             off = 0
             for sample, (col, width) in enumerate(zip(columns, left_sizes)):
                 if col[i].shape[2] != 1:
@@ -382,7 +403,7 @@ def _stack_mps_columns(columns: list[list[np.ndarray]], scale: float = 1.0) -> l
                 core[off:off + width, :, sample] = col[i][:, :, 0]
                 off += width
         else:
-            core = np.zeros((sum(left_sizes), phys, sum(right_sizes)), dtype=dtype)
+            core = xp.zeros((sum(left_sizes), phys, sum(right_sizes)), dtype=dtype)
             lo = ro = 0
             for col, lw, rw in zip(columns, left_sizes, right_sizes):
                 core[lo:lo + lw, :, ro:ro + rw] = col[i]
@@ -412,7 +433,10 @@ def _combined_sampled_cores(q_cores: list[np.ndarray], r_cores: list[np.ndarray]
         if q.shape[2] != r.shape[1]:
             raise ValueError("Q/residual horizontal dimensions do not match")
         # (q_down, r_down, output, q_up, r_up)
-        site = np.einsum("aohb,chd->acobd", q, r, optimize=True)
+        xp = array_namespace(q, r)
+        q = xp.asarray(q)
+        r = xp.asarray(r)
+        site = xp.einsum("aohb,chd->acobd", q, r, optimize=True)
         out.append(site.reshape(q.shape[0] * r.shape[0], q.shape[1], q.shape[3] * r.shape[2]))
     return out
 
@@ -431,7 +455,10 @@ def _residual_from_column(q_cores: list[np.ndarray], column: ColumnOperator) -> 
         if q.shape[1] != c.shape[1]:
             raise ValueError("Q output dimension does not match the column")
         # q=(a,o,h,b), c=(x,o,d,y) -> (a*x,h,d,b*y)
-        core = np.einsum("aohb,xody->axhdby", q.conj(), c, optimize=True)
+        xp = array_namespace(q, c)
+        q = xp.asarray(q)
+        c = xp.asarray(c)
+        core = xp.einsum("aohb,xody->axhdby", q.conj(), c, optimize=True)
         out.append(core.reshape(q.shape[0] * c.shape[0], q.shape[2], c.shape[2],
                                 q.shape[3] * c.shape[3]))
     return out
@@ -452,11 +479,14 @@ def _range_block_mps(
     for _ in range(int(ell)):
         omega = rmps_cores(column.input_dims, int(chi_sk), rng,
                            complex_valued=complex_valued)
+        omega = [backend_asarray(core, like=column.cores[0]) for core in omega]
         flops += _mpo_mps_flops(column.cores, omega)
         sampled = column.matvec_mps(omega)
         contractions += column.lx
         for _ in range(max(0, int(n_power))):
-            adjoint = [np.conj(core).transpose(0, 2, 1, 3) for core in column.cores]
+            xp = array_namespace(column.cores)
+            adjoint = [xp.asarray(core).conj().transpose(0, 2, 1, 3)
+                       for core in column.cores]
             flops += _mpo_mps_flops(adjoint, sampled)
             sampled = column.rmatvec_mps(sampled)
             flops += _mpo_mps_flops(column.cores, sampled)
@@ -493,11 +523,14 @@ def factor_sampled_block_mps(
         if left.shape[2] != right.shape[0]:
             raise ValueError("sampled block-MPS bond mismatch")
 
+    xp = array_namespace(sampled_cores)
+    if xp is not np and int(ndis) > 0:
+        raise ValueError("GPU bounded-residual factorization currently requires ndis=0")
     gen = np.random.default_rng() if rng is None else rng
     sampled_cores = _right_canonicalize_block_mps(sampled_cores)
-    dtype = np.result_type(*sampled_cores)
+    dtype = xp.result_type(*[core.dtype for core in sampled_cores])
     # (Q vertical down, sampled-MPS bond down, residual vertical down)
-    carrier = np.ones((1, 1, 1), dtype=dtype)
+    carrier = xp.ones((1, 1, 1), dtype=dtype)
     q_cores: list[np.ndarray] = []
     r_cores: list[np.ndarray] = []
     records: list[BoundedCutRecord] = []
@@ -512,24 +545,25 @@ def factor_sampled_block_mps(
             raise ValueError(f"carrier/sample bond mismatch at site {site}")
         q_down, _, residual_down = map(int, carrier.shape)
         # theta=(q_down, output, sampled_up, residual_down)
-        theta = np.einsum("amc,mob->aobc", carrier, core, optimize=True)
+        theta = xp.einsum("amc,mob->aobc", carrier, core, optimize=True)
         contraction_count += 1
         contraction_flops += _contract_flops(
-            theta.size, m_down, np.iscomplexobj(carrier) or np.iscomplexobj(core)
+            theta.size, m_down, _is_complex(carrier) or _is_complex(core)
         )
         mat = theta.reshape(q_down * output, m_up * residual_down)
 
         if site == len(sampled_cores) - 1:
             rank = max(1, min(int(eta), min(mat.shape)))
-            u, singular, vh = la.svd(mat, full_matrices=False, check_finite=False,
-                                     lapack_driver="gesdd")
+            u, singular, vh = backend_svd(mat)
             qmat = u[:, :rank]
             q_cores.append(qmat.reshape(q_down, output, rank, 1))
             rtop = singular[:rank, None] * vh[:rank]
             # right boundary m_up is the sample label ell
             r_cores.append(rtop.reshape(rank, m_up, residual_down).transpose(2, 0, 1))
-            discarded = float(np.sum(singular[rank:] ** 2))
-            defect = float(np.linalg.norm(qmat.conj().T @ qmat - np.eye(rank)))
+            discarded = float(to_numpy(xp.sum(singular[rank:] ** 2)))
+            defect = float(to_numpy(
+                xp.linalg.norm(qmat.conj().T @ qmat - xp.eye(rank, dtype=qmat.dtype))
+            ))
             delta_local = max(delta_local, defect)
             records.append(BoundedCutRecord(
                 site=site, kind="top", first_shape=mat.shape, second_shape=None,
@@ -545,8 +579,7 @@ def factor_sampled_block_mps(
             min(rank_limit, int(eta) * int(kappa)), int(eta), int(kappa)
         )
         composite = q_up * residual_dim
-        u1, singular1, vh1 = la.svd(mat, full_matrices=False, check_finite=False,
-                                    lapack_driver="gesdd")
+        u1, singular1, vh1 = backend_svd(mat)
         vtilde = singular1[:composite, None] * vh1[:composite]
         second_rows = q_up * m_up
         second_cols = residual_dim * residual_down
@@ -554,7 +587,7 @@ def factor_sampled_block_mps(
 
         gauge_iters = 0
         gauge_defect = 0.0
-        gauge = np.eye(composite, dtype=dtype)
+        gauge = xp.eye(composite, dtype=dtype)
         # Product gauges on q_up x residual_dim are spectrally inert after the
         # reshuffle.  Only a full gauge with both factors nontrivial can help.
         if int(ndis) > 0 and q_up > 1 and residual_dim > 1:
@@ -568,8 +601,7 @@ def factor_sampled_block_mps(
         q_core = qmat.reshape(q_down, output, q_up, residual_dim).transpose(0, 1, 3, 2)
         gauged = (gauge @ vtilde).reshape(q_up, residual_dim, m_up, residual_down)
         second = gauged.transpose(0, 2, 1, 3).reshape(second_rows, second_cols)
-        u2, singular2, vh2 = la.svd(second, full_matrices=False, check_finite=False,
-                                    lapack_driver="gesdd")
+        u2, singular2, vh2 = backend_svd(second)
         # Mirror the real Moses move's absorb=-1 convention: singular values ride
         # with the upward carrier; the peeled residual core is row-isometric.
         carrier = (u2[:, :residual_up] * singular2[:residual_up]).reshape(
@@ -579,15 +611,19 @@ def factor_sampled_block_mps(
 
         q_cores.append(q_core)
         r_cores.append(r_core)
-        defect = float(np.linalg.norm(qmat.conj().T @ qmat - np.eye(composite)))
+        defect = float(to_numpy(
+            xp.linalg.norm(
+                qmat.conj().T @ qmat - xp.eye(composite, dtype=qmat.dtype)
+            )
+        ))
         delta_local = max(delta_local, defect)
         records.append(BoundedCutRecord(
             site=site, kind="internal", first_shape=mat.shape, second_shape=second.shape,
             q_down=q_down, q_up=q_up, residual_down=residual_down,
             residual_up=residual_up, kappa_actual=residual_dim,
             singular_first=singular1.copy(), singular_second=singular2.copy(),
-            discarded_first=float(np.sum(singular1[composite:] ** 2)),
-            discarded_second=float(np.sum(singular2[residual_up:] ** 2)),
+            discarded_first=float(to_numpy(xp.sum(singular1[composite:] ** 2))),
+            discarded_second=float(to_numpy(xp.sum(singular2[residual_up:] ** 2))),
             gauge_iters=gauge_iters, gauge_unitary_defect=gauge_defect,
         ))
         peak_bytes = max(
@@ -600,10 +636,15 @@ def factor_sampled_block_mps(
     # If E_i = Q_i^*Q_i-I, recursive contraction gives a conservative spectral
     # perturbation bound prod_i(1+||E_i||_2)-1.  Dense oracle runs also report the
     # requested exact Frobenius global defect below.
-    global_bound = float(np.expm1(sum(np.log1p(max(0.0, float(np.linalg.norm(
-        q.reshape(q.shape[0] * q.shape[1], -1).conj().T
-        @ q.reshape(q.shape[0] * q.shape[1], -1) - np.eye(q.shape[2] * q.shape[3])
-    )))) for q in q_cores)))
+    local_defects = []
+    for q in q_cores:
+        matrix = q.reshape(q.shape[0] * q.shape[1], -1)
+        identity = xp.eye(matrix.shape[1], dtype=matrix.dtype)
+        local_defects.append(float(to_numpy(
+            xp.linalg.norm(matrix.conj().T @ matrix - identity)
+        )))
+    global_bound = float(np.expm1(sum(np.log1p(max(0.0, value))
+                                      for value in local_defects)))
     return (
         q_cores, r_cores, records, delta_local, global_bound,
         contraction_count, peak_bytes, contraction_flops,
@@ -628,31 +669,36 @@ def bounded_residual_column_qr(
     """Execute the matrix-free sampled-range factorization and build ``Q^* C``.
 
     ``sketch_kind='rmps'`` is the proposed method and ``'kron'`` is its
-    ``chi_sk=1`` negative control.  ``'gaussian'`` is deliberately a dense,
-    small-system oracle and therefore requires a materializable ``reference`` (or
-    a column below the normal dense guard).
+    ``chi_sk=1`` negative control.  The Gaussian, Rademacher, and SparseStack
+    methods are dense small-system controls and require a materializable column.
     """
     if ell < 1 or eta < 1 or kappa < 1:
         raise ValueError("ell, eta, and kappa must be positive")
     if n_power < 0:
         raise ValueError("n_power must be nonnegative")
-    if sketch_kind not in ("rmps", "kron", "gaussian"):
+    if sketch_kind not in ("rmps", "kron", "gaussian", "rademacher", "sparsestack"):
         raise ValueError(f"unknown sketch kind: {sketch_kind!r}")
 
     gen = np.random.default_rng() if rng is None else rng
+    xp = array_namespace(column.cores)
+    if xp is not np and int(ndis) > 0:
+        raise ValueError("GPU bounded-residual factorization currently requires ndis=0")
+    synchronize(column.cores)
     t0 = perf_counter()
     used_chi = 1 if sketch_kind == "kron" else int(chi_sk)
-    complex_valued = any(np.iscomplexobj(core) for core in column.cores)
+    complex_valued = any(_is_complex(core) for core in column.cores)
     ell = max(1, min(int(ell), column.n_in))
 
-    if sketch_kind == "gaussian":
-        c = column.materialize() if reference is None else reference
-        if complex_valued:
-            omega = (gen.standard_normal((column.n_in, ell))
-                     + 1j * gen.standard_normal((column.n_in, ell))) / np.sqrt(2.0 * ell)
+    if sketch_kind in ("gaussian", "rademacher", "sparsestack"):
+        if reference is None:
+            c = column.materialize()
+            c_host = to_numpy(c)
         else:
-            omega = gen.standard_normal((column.n_in, ell)) / np.sqrt(ell)
-        y = c @ omega
+            c_host = to_numpy(reference)
+            c = backend_asarray(c_host, like=column.cores[0])
+        sampled_host = range_sample(c_host, ell, gen, sketch_kind)
+        y = backend_asarray(sampled_host, like=c)
+        ell = int(y.shape[1])
         for _ in range(int(n_power)):
             y = c @ (c.conj().T @ y)
         sampled_cores = dense_to_block_mps(y, column.output_dims)
@@ -678,7 +724,7 @@ def bounded_residual_column_qr(
     reconstruction_flops = sum(
         _contract_flops(
             q.shape[0] * r.shape[0] * q.shape[1] * q.shape[3] * r.shape[2],
-            q.shape[2], np.iscomplexobj(q) or np.iscomplexobj(r),
+            q.shape[2], _is_complex(q) or _is_complex(r),
         )
         for q, r in zip(q_cores, sample_r)
     )
@@ -688,7 +734,7 @@ def bounded_residual_column_qr(
         _contract_flops(
             q.shape[0] * c.shape[0] * q.shape[2] * c.shape[2]
             * q.shape[3] * c.shape[3],
-            q.shape[1], np.iscomplexobj(q) or np.iscomplexobj(c),
+            q.shape[1], _is_complex(q) or _is_complex(c),
         )
         for q, c in zip(q_cores, column.cores)
     )
@@ -698,6 +744,7 @@ def bounded_residual_column_qr(
     if tracemalloc.is_tracing():
         _, traced_factor_peak = tracemalloc.get_traced_memory()
         peak = max(peak, int(traced_factor_peak))
+    synchronize(residual_cores)
     factor_runtime = perf_counter() - t0
 
     residual_dims = tuple(int(q.shape[2]) for q in q_cores)
@@ -714,30 +761,37 @@ def bounded_residual_column_qr(
     oracle_t0 = perf_counter()
     if dense_possible:
         q_dense = materialize_q(q_cores)
-        delta_global = float(np.linalg.norm(q_dense.conj().T @ q_dense - np.eye(q_dense.shape[1])))
+        dense_xp = array_namespace(q_dense)
+        delta_global = float(to_numpy(dense_xp.linalg.norm(
+            q_dense.conj().T @ q_dense
+            - dense_xp.eye(q_dense.shape[1], dtype=q_dense.dtype)
+        )))
         y_dense = block_mps_to_matrix(sampled_cores)
         rs_dense = block_mps_to_matrix(sample_r)
-        residual_consistency = float(
-            np.linalg.norm(rs_dense - q_dense.conj().T @ y_dense)
-            / max(np.linalg.norm(y_dense), 1e-300)
+        y_norm = float(to_numpy(dense_xp.linalg.norm(y_dense)))
+        residual_consistency = float(to_numpy(
+            dense_xp.linalg.norm(rs_dense - q_dense.conj().T @ y_dense)
+        )) / max(y_norm, 1e-300)
+        c_dense = (
+            column.materialize()
+            if reference is None
+            else backend_asarray(reference, like=q_dense)
         )
-        c_dense = column.materialize() if reference is None else reference
         if reference_singular_values is None:
-            singular_c = la.svdvals(c_dense, check_finite=False)
+            singular_c = backend_svdvals(c_dense)
         else:
-            singular_c = np.asarray(reference_singular_values, dtype=float)
+            singular_c = backend_asarray(
+                reference_singular_values, like=q_dense, dtype=float
+            )
             if singular_c.ndim != 1 or singular_c.size != min(c_dense.shape):
                 raise ValueError("reference singular values have incompatible shape")
-        c_norm_sq = float(np.sum(singular_c ** 2))
+        c_norm_sq = float(to_numpy(dense_xp.sum(singular_c ** 2)))
         r_dense = ColumnOperator(residual_cores).materialize()
-        projection_error = float(
-            np.linalg.norm(c_dense - q_dense @ r_dense)
-            / max(np.sqrt(c_norm_sq), 1e-300)
-        )
-        spectral_tail = float(np.sqrt(
-            np.sum(singular_c[q_columns:] ** 2)
-            / max(c_norm_sq, 1e-300)
-        ))
+        projection_error = float(to_numpy(
+            dense_xp.linalg.norm(c_dense - q_dense @ r_dense)
+        )) / max(np.sqrt(c_norm_sq), 1e-300)
+        tail_sq = float(to_numpy(dense_xp.sum(singular_c[q_columns:] ** 2)))
+        spectral_tail = float(np.sqrt(tail_sq / max(c_norm_sq, 1e-300)))
         projection_excess = float(np.sqrt(max(
             projection_error ** 2 - spectral_tail ** 2, 0.0
         )))
@@ -745,6 +799,7 @@ def bounded_residual_column_qr(
             x.nbytes for x in (q_dense, y_dense, rs_dense, c_dense, r_dense, singular_c)
         ))
 
+    synchronize(q_cores)
     oracle_runtime = perf_counter() - oracle_t0
     return BoundedResidualResult(
         eta=int(eta), kappa=int(kappa), chi_sk=used_chi, ell=ell,
@@ -804,13 +859,14 @@ def score_projection_error(
     used_chi = max(int(result.chi_sk), column.lx) if chi_score is None else int(chi_score)
     if used_chi < 1:
         raise ValueError("chi_score must be positive")
-    complex_valued = any(np.iscomplexobj(core) for core in column.cores)
+    complex_valued = any(_is_complex(core) for core in column.cores)
     q_operator = ColumnOperator(result.q_cores)
     residual_operator = result.residual_operator
     numerator = np.empty(int(n_probes), dtype=float)
     denominator = np.empty(int(n_probes), dtype=float)
     peak_bond = 1
     contraction_flops = 0
+    synchronize(column.cores)
     t0 = perf_counter()
 
     for probe in range(int(n_probes)):
@@ -841,6 +897,7 @@ def score_projection_error(
             max_mps_bond(projected),
         )
 
+    synchronize(column.cores)
     estimate = float(np.sqrt(np.sum(numerator) / max(np.sum(denominator), 1e-300)))
     if int(n_bootstrap) >= 2 and int(n_probes) >= 2:
         boot = np.empty(int(n_bootstrap), dtype=float)

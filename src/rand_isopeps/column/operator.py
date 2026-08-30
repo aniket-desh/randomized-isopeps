@@ -44,6 +44,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from rand_isopeps.backend import array_namespace, to_numpy
 from rand_isopeps.compression.mpo_mps_absorb import (
     apply_mpo_adjoint_to_mps,
     apply_mpo_to_mps,
@@ -97,10 +98,13 @@ def mpo_frobenius_norm(cores: list[np.ndarray]) -> float:
     Contracts each core ``(ml, dout, din, mr)`` with its conjugate over both physical
     legs, carrying the doubled bond environment. Replaces ``norm(materialize())`` so a
     column can be normalized without forming the ``(d*chi)^Lx`` matrix."""
-    env = np.ones((1, 1), dtype=np.result_type(*[c.dtype for c in cores]))
+    xp = array_namespace(cores)
+    env = xp.ones((1, 1), dtype=xp.result_type(*[c.dtype for c in cores]))
     for a in cores:  # a: (ml, dout, din, mr)
-        env = np.einsum("ab,aijc,bijd->cd", env, a.conj(), a, optimize=True)
-    return float(np.sqrt(max(np.abs(env[0, 0]), 0.0)))
+        a = xp.asarray(a)
+        env = xp.einsum("ab,aijc,bijd->cd", env, a.conj(), a, optimize=True)
+    value = float(to_numpy(xp.abs(env[0, 0])))
+    return float(np.sqrt(max(value, 0.0)))
 
 
 def _as_tuple(value: int | tuple[int, ...], lx: int) -> tuple[int, ...]:
@@ -174,14 +178,15 @@ class ColumnOperator:
         dense budget (see :func:`assert_dense_safe`) instead of OOM-killing the host.
         """
         assert_dense_safe(self.n_out, self.n_in, context="ColumnOperator.materialize")
-        work = self.cores[0][0]  # drop left boundary bond -> (dout0, din0, mr0)
+        xp = array_namespace(self.cores)
+        work = xp.asarray(self.cores[0])[0]
         for core in self.cores[1:]:
-            work = np.tensordot(work, core, axes=(-1, 0))  # (..., dout_i, din_i, mr_i)
+            work = xp.tensordot(work, xp.asarray(core), axes=(-1, 0))
         work = work[..., 0]  # drop trailing right boundary bond -> axes out0,in0,out1,in1,...
         lx = self.lx
         out_axes = list(range(0, 2 * lx, 2))
         in_axes = list(range(1, 2 * lx, 2))
-        mat = np.transpose(work, out_axes + in_axes).reshape(self.n_out, self.n_in)
+        mat = xp.transpose(work, out_axes + in_axes).reshape(self.n_out, self.n_in)
         return mat
 
     def matvec_mps(self, omega_cores: list[np.ndarray]) -> list[np.ndarray]:

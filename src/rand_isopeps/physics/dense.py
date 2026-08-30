@@ -1,4 +1,4 @@
-"""Exact small-system physics and Rayleigh diagnostics.
+"""exact small-system physics and rayleigh diagnostics.
 
 States are dense because that is the oracle regime; Hamiltonians remain sparse.
 The same functions score small PEPS after converting them to a vector, which
@@ -14,6 +14,8 @@ import scipy.linalg as la
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
+from rand_isopeps.backend import to_numpy
+
 
 LAYER_NAMES = (
     "horizontal_even",
@@ -24,7 +26,7 @@ LAYER_NAMES = (
 
 
 def normalize_state(state: np.ndarray) -> np.ndarray:
-    """Return a normalized vector or column block without changing the input."""
+    """return a normalized vector or column block without changing the input."""
     array = np.asarray(state)
     if array.ndim == 1:
         norm = float(np.linalg.norm(array))
@@ -65,16 +67,17 @@ def _embed_term(term, where, lx: int, ly: int, local_dim: int):
 
     sites = tuple(where) if isinstance(where[0], tuple) else (where,)
     indices = tuple(int(i * ly + j) for i, j in sites)
-    return qu.pkron(
+    embedded = qu.pkron(
         np.asarray(term),
         [local_dim] * (lx * ly),
         indices,
         sparse=True,
-    ).tocsr()
+    )
+    return embedded.tocsr() if sp.issparse(embedded) else sp.csr_matrix(embedded)
 
 
 def sparse_hamiltonian(ham, lx: int | None = None, ly: int | None = None):
-    """Embed ``LocalHam2D.terms`` into a row-major sparse Hamiltonian."""
+    """embed ``LocalHam2D.terms`` into a row-major sparse hamiltonian."""
     lx, ly = _geometry(ham, lx, ly)
     d = _local_dimension(ham)
     size = d ** (lx * ly)
@@ -85,7 +88,7 @@ def sparse_hamiltonian(ham, lx: int | None = None, ly: int | None = None):
 
 
 def bond_hamiltonians(ham, lx: int | None = None, ly: int | None = None) -> dict:
-    """Return every local term embedded in the full sparse Hilbert space."""
+    """return every local term embedded in the full sparse hilbert space."""
     lx, ly = _geometry(ham, lx, ly)
     d = _local_dimension(ham)
     return {
@@ -104,7 +107,7 @@ def _layer_name(where) -> str:
 
 
 def checkerboard_layers(ham, lx: int | None = None, ly: int | None = None) -> dict:
-    """Split ``H`` into horizontal/vertical even/odd commuting bond layers."""
+    """split ``h`` into horizontal/vertical even/odd commuting bond layers."""
     lx, ly = _geometry(ham, lx, ly)
     d = _local_dimension(ham)
     size = d ** (lx * ly)
@@ -124,12 +127,12 @@ def checkerboard_layers(ham, lx: int | None = None, ly: int | None = None) -> di
 
 
 def local_term_norm_bound(ham) -> float:
-    """A cheap upper bound ``sum_b ||h_b||_2 >= ||H||_2``."""
+    """a cheap upper bound ``sum_b ||h_b||_2 >= ||h||_2``."""
     return float(sum(la.norm(np.asarray(term), 2) for term in ham.terms.values()))
 
 
 def rayleigh_residual(h, state: np.ndarray, *, h_norm_bound: float | None = None) -> dict:
-    """Compute the Rayleigh quotient, residual, and variance identity.
+    """compute the rayleigh quotient, residual, and variance identity.
 
     For normalized ``x`` and Hermitian ``H``, ``||Hx-lambda*x||^2`` equals
     ``<H^2>-lambda^2``. The direct residual is primary because the expanded
@@ -162,7 +165,7 @@ def rayleigh_residual(h, state: np.ndarray, *, h_norm_bound: float | None = None
 
 
 def rayleigh_ritz(h, states: np.ndarray, *, h_norm_bound: float | None = None) -> dict:
-    """Orthonormalize a state block and solve its projected eigenproblem."""
+    """orthonormalize a state block and solve its projected eigenproblem."""
     block = np.asarray(states)
     if block.ndim != 2:
         raise ValueError("states must have shape (hilbert_dimension, n_states)")
@@ -188,14 +191,14 @@ def rayleigh_ritz(h, states: np.ndarray, *, h_norm_bound: float | None = None) -
 
 
 def exact_imaginary_step(h, state: np.ndarray, tau: float) -> np.ndarray:
-    """Apply ``exp(-tau H)`` and normalize each state column."""
+    """apply ``exp(-tau h)`` and normalize each state column."""
     if tau <= 0.0:
         raise ValueError("tau must be positive")
     return normalize_state(spla.expm_multiply((-float(tau)) * h, np.asarray(state)))
 
 
 def trotter_imaginary_step(layers: dict, state: np.ndarray, tau: float) -> np.ndarray:
-    """Apply one second-order palindromic Suzuki--Trotter step."""
+    """apply one second-order palindromic suzuki--trotter step."""
     if tau <= 0.0:
         raise ValueError("tau must be positive")
     active = [layers[name]["matrix"] for name in LAYER_NAMES if layers[name]["bonds"]]
@@ -237,7 +240,7 @@ def bond_trotter_imaginary_step(
     ly: int,
     direction: int = 1,
 ) -> np.ndarray:
-    """Dense oracle for the exact ordered gates used by ``tebd_iteration``."""
+    """dense oracle for the exact ordered gates used by ``tebd_iteration``."""
     if tau <= 0.0:
         raise ValueError("tau must be positive")
     if direction not in (-1, 1):
@@ -250,14 +253,69 @@ def bond_trotter_imaginary_step(
     return normalize_state(out)
 
 
+def bond_first_order_imaginary_step(
+    bonds: dict,
+    state: np.ndarray,
+    tau: float,
+    *,
+    ly: int,
+    direction: int = 1,
+) -> np.ndarray:
+    """apply the ordered single sweep used by first-order peps evolution."""
+    if tau <= 0.0:
+        raise ValueError("tau must be positive")
+    if direction not in (-1, 1):
+        raise ValueError("direction must be +1 or -1")
+    out = np.asarray(state)
+    for matrix in _sweep_bond_order(bonds, ly, direction):
+        out = spla.expm_multiply((-float(tau)) * matrix, out)
+    return normalize_state(out)
+
+
+def block_first_order_imaginary_step(
+    bonds: dict,
+    state: np.ndarray,
+    tau: float,
+    *,
+    lx: int,
+    ly: int,
+    direction: int = 1,
+) -> np.ndarray:
+    """apply the vertical-then-horizontal order used by block peps."""
+    if tau <= 0.0:
+        raise ValueError("tau must be positive")
+    if direction not in (-1, 1):
+        raise ValueError("direction must be +1 or -1")
+    lookup = {frozenset(where): matrix for where, matrix in bonds.items()}
+    columns = range(ly) if direction == 1 else range(ly - 1, -1, -1)
+    rows = range(lx - 1) if direction == 1 else range(lx - 2, -1, -1)
+    order = [
+        ((row, column), (row + 1, column))
+        for column in columns
+        for row in rows
+    ]
+    rotated_columns = range(lx) if direction == 1 else range(lx - 1, -1, -1)
+    rotated_rows = (
+        range(ly - 1) if direction == 1 else range(ly - 2, -1, -1)
+    )
+    for column in rotated_columns:
+        for row in rotated_rows:
+            rotated = ((row, column), (row + 1, column))
+            order.append(tuple((y, ly - 1 - x) for x, y in rotated))
+    out = np.asarray(state)
+    for where in order:
+        out = spla.expm_multiply((-float(tau)) * lookup[frozenset(where)], out)
+    return normalize_state(out)
+
+
 def dense_state_vector(psi) -> tuple[np.ndarray, float]:
-    """Return a normalized PEPS vector and its base-10 log norm safely."""
+    """return a normalized peps vector and its base-10 log norm safely."""
     exponent = float(getattr(psi, "exponent", 0.0))
     if not np.isfinite(exponent):
         raise ValueError(f"tensor-network exponent is non-finite: {exponent}")
     try:
         psi.exponent = 0.0
-        vector = np.asarray(psi.to_dense()).reshape(-1)
+        vector = to_numpy(psi.to_dense()).reshape(-1)
     finally:
         psi.exponent = exponent
     if np.any(~np.isfinite(vector)):

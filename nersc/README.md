@@ -3,8 +3,8 @@
 A crash course + workflow briefing for running this project's experiments on **NERSC
 Perlmutter** (LBL). It translates the Compute-Canada **Trillium** Slurm workflow used on
 the Vector project (kept verbatim in [`trillium_reference/`](trillium_reference/)) to
-NERSC, and adapts it to the fact that **`rand_isopeps` is CPU / BLAS-bound** (numpy, scipy,
-optional quimb — no GPU). Written to be followed by a human *or* an agent: every command is
+NERSC, and adapts it to a primarily CPU/BLAS tensor-network code with a gated CuPy path
+for the matrix-free column kernels. Written to be followed by a human *or* an agent: every command is
 copy-paste, and §9 is an agent operating guide.
 
 > The two clusters both run **Slurm**, so the *shape* of the workflow carries over. What
@@ -29,14 +29,15 @@ squeue --me                                # watch it
 scripted in `nersc/{deploy,publish,pull_data}.sh` — see **§11**. Network steps (`git
 pull/push`) run on a login node; the job only runs and stages results.
 
-- This project runs **CPU jobs** (`-C cpu`), not GPU. It's dominated by dense/randomized
-  SVDs, QRs and matmuls.
+- The retained phase-one and phase-two runners use **CPU jobs** (`-C cpu`). The new
+  `paper_campaign` adds CuPy GPU pilots and promoted accuracy tasks behind an explicit
+  CPU/GPU parity gate; high-bond reference generation remains on CPU.
 - The active physics runner owns one sequential trajectory. Parallelize modes,
   Hamiltonians, and seeds with a Slurm array; `--blas-threads` is its only
   in-process parallelism knob. The older sketching laboratory still uses
   `--workers` as described in §6.
-- Dense and small-PEPS accuracy sweeps use the `shared` QOS; 4x4 PEPS trajectories
-  use a full CPU node. The code is NumPy/SciPy/quimb and does not use the GPU pool.
+- The paper campaign uses `shared` QOS resource classes. Dektor block trajectories and
+  references stay on CPU; only validated p=1 sketch paths use the GPU pool.
 - Large-Lx runs are **memory-bound** (dense column ~`16·2^Lx·8^Lx` bytes); the worker count
   is auto-capped by RAM. See §6.1.
 
@@ -58,13 +59,17 @@ pull/push`) run on a login node; the job only runs and stages results.
   sacctmgr -p show assoc user=$USER format=account,qos
   ```
 - **Your allocation** (project `m4926` = *farqu*, user `aniketd`, PI Van Beeumen):
-  the live 2026-08-05 snapshot showed **366.1 released CPU node-hours, 109.8
-  charged, and about 256.3 remaining** on `m4926`; `m4926_g` showed **1427.6 GPU
-  node-hours unused**. These values drift, so refresh them in Iris before a large submission.
-  The personal caps are roughly 450 CPU and 1,799 GPU node-hours, a 10% slice of the shared pool.
-  Charge factor is **1.0**, so node-hours = walltime × nodes × QOS-factor. Allocation releases
+  the supplied 2026-08-29 Iris snapshot shows about **253 CPU node-hours** remaining
+  on `m4926` and **1,428 GPU node-hours** remaining on `m4926_g`. These values drift,
+  so refresh them in Iris before a large submission.
+  The screenshot's computed personal allocations are 366 CPU and 1,428 GPU node-hours;
+  those shares can change with project releases and allocation transfers.
+  The shown charge factor is **1.0**. Full-node jobs charge walltime × nodes × charge
+  factor, while `shared` jobs charge the requested physical-core, GPU, or governing
+  memory fraction; use the paper-campaign dry-run summary for those fractional rates. Allocation releases
   **quarterly** (10/20/30/40%) and unused *released* hours expire — watch "Hours at risk" in
-  Iris. CFS is `/global/cfs/cdirs/m4926` (20 TB). The GPU pool is unused (CPU-only stack today).
+  Iris. CFS is `/global/cfs/cdirs/m4926` (20 TB). The paper campaign can use the GPU pool
+  after its CuPy parity pilot passes.
 
 ---
 
@@ -97,11 +102,11 @@ PROJECT=m4926 bash nersc/setup_env.sh
 
 which is, in essence:
 ```bash
-module load python                                   # NERSC's conda base
+module load python cudatoolkit/12.9                  # NERSC's conda base and CUDA 12
 conda create -y --prefix /global/common/software/$PROJECT/rand-isopeps-env \
     python=3.11 pip numpy scipy matplotlib threadpoolctl
 conda activate /global/common/software/$PROJECT/rand-isopeps-env
-pip install -e ".[quimb]"                            # package + real-isoTNS Moses-move extra
+pip install -e ".[quimb,gpu,riemannian]"             # quimb, cupy, and tangent-space dependencies
 ```
 In every job script you then `module load python && source activate <that prefix>` — use
 `source activate` (or source the conda shell hook) in **batch** scripts; a bare
@@ -116,7 +121,7 @@ In every job script you then `module load python && source activate <that prefix
 | pick a node | `--partition=compute_full_node` | **`-C cpu`** (or `-C gpu`) |
 | queue / limits | *(implied by partition)* | **`-q regular`** \| `debug` (≤30 min) \| `shared` (partial node) \| `interactive` |
 | account | `--account=rrg-aspuru` | **`-A <project>`** (CPU) / **`-A <project>_g`** (GPU) |
-| CPUs | `--cpus-per-task=8` | `-c <cores>` (up to **128** on a CPU node) |
+| CPUs | `--cpus-per-task=8` | `-c <logical CPUs>` (256 per CPU node; 128 per GPU node) |
 | GPUs | `--gpus-per-node=4` | `--gpus-per-node=4` **and** `-C gpu` *(GPU jobs only)* |
 | modules | `module load StdEnv/2023 python/3.11 cuda/12.2 scipy-stack` | **`module load python`** (+ `cudatoolkit` only for GPU) |
 | environment | `source ~/envs/gqs/bin/activate` (venv) | **`conda activate <prefix on Common>`** |
@@ -141,6 +146,86 @@ In every job script you then `module load python && source activate <that prefix
 
 Edit the `--account` and the conda-env prefix, point the `srun … python …` line at your
 experiment, then `sbatch`.
+
+### paper campaign arrays
+
+The paper campaign has separate shared-QOS launchers for CPU (`m4926`) and one-GPU
+(`m4926_g`) tasks; GPU arrays use the reproducible 40 GB A100 class. The helper rebuilds
+deterministic manifests, separates mixed families by their complete resource declarations,
+conservatively shards arrays at 1,000 zero-based tasks, and prints every `sbatch` command.
+It is a dry run unless `--submit` is present:
+
+```bash
+python nersc/submit_paper_campaign.py
+```
+
+CPU work and the complete paired GPU pilot can run together. The conservative defaults
+allow one active element in each generated array. `--cpu-array-throttle` and
+`--gpu-array-throttle` are per-array limits, so each resource class and shard gets its own
+independent cap; they do not bound the whole campaign. The dry run sums those independent
+caps and prints the worst-case simultaneous allocations and node-hour charge rate, since
+shared-QOS charging follows the physical-core or GPU fraction. It also prints the charge
+ceiling if every task consumes its complete 24-hour request; the current full plan's
+2,943.75 CPU and 2,778 GPU node-hour ceiling exceeds both personal pools, so pilots must
+replace that ceiling with measured walltimes before broad submission:
+
+```bash
+python nersc/submit_paper_campaign.py \
+  --family physics --hardware cpu --pilot-largest
+python nersc/submit_paper_campaign.py \
+  --family gpu_pilot --submit
+python nersc/submit_paper_campaign.py \
+  --family references --reference-stage 1 --hardware cpu --submit
+```
+
+`--pilot-largest` writes a one-task immutable shard for every selected resource class and
+prints the chosen task ID, study, lattice, state count, and method. It is a dry run unless
+`--submit` is also present, so it can be inspected before consuming allocation.
+
+The pilot command must submit both backends. When all pilot arrays finish, validate their
+records into the promotion artifact required by every non-pilot CuPy task, using the
+content-addressed full-family manifest path printed at submission:
+
+```bash
+campaign_out=/global/cfs/cdirs/m4926/risopeps/outputs/paper_campaign
+python experiments/paper_campaign/validate_gpu_pilot.py \
+  "$campaign_out" "$campaign_out/gpu_gate.json" \
+  --manifest <immutable-gpu-pilot-family-manifest>
+```
+
+After the exact small-cell calibration in stage 1 validates, including the independent
+Dektor Table 2 energy cross-check, run the paired high-bond
+energy-and-orthogonality references. Export the resulting artifact before dependent
+physics cells, then promote GPU work:
+
+```bash
+python nersc/submit_paper_campaign.py \
+  --family references --reference-stage 2 --hardware cpu --submit
+python experiments/paper_campaign/export_references.py \
+  "$campaign_out" "$campaign_out/references.json"
+python nersc/submit_paper_campaign.py \
+  --family physics --hardware gpu --submit
+```
+
+Each array element owns one manifest task. It runs with bound `srun` resources from a
+per-task `$PSCRATCH` working directory. Full-family and split manifests are staged under
+`OUTPUT_ROOT/manifests` with content-addressed names before `sbatch`, so queued array
+indices cannot change after a local rebuild. Checkpoints use a deterministic scratch
+path that survives requeue or resubmission, while completed immutable JSONL goes to
+`OUTPUT_ROOT` on CFS and removes the checkpoint. The application stops by the configured
+resource-class grace interval before
+the allocated end time and returns code 75 after checkpointing; only that code triggers
+`scontrol requeue`. The launchers request one explicit 24-hour walltime because NERSC
+does not guarantee that a lowered `--time-min` allocation is reflected in the runtime
+deadline used by the application. Slurm `--signal` is intentionally unused while NERSC
+lists it as a current known issue.
+
+Long block cells currently reserve a two-hour grace even though resumable checkpoints
+are written after each completed block-sweep column. Use pilot column timings to tune
+that value before broad submission. The submitter validates the complete GPU gate and required reference
+cell/state/sector coverage before calling `sbatch`; artifact existence alone is not enough.
+Task counts likewise cannot establish allocation fit, so estimate charges from pilot
+walltimes before increasing the per-array throttles or submitting several families at once.
 
 | Template | When | Key flags |
 |---|---|---|

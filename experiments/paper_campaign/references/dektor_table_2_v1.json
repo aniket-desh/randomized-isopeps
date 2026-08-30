@@ -1,0 +1,27 @@
+{
+  "schema_version": "dektor_table_2_v1",
+  "provenance": {
+    "kind": "published_literature",
+    "source": "Dektor et al., Computing excited states with isometric tensor networks in two-dimensions",
+    "source_arxiv": "2510.20063v1",
+    "source_url": "https://arxiv.org/abs/2510.20063",
+    "table": 2,
+    "retrieved_columns": [
+      "reference",
+      "isoPEPS chi=12 eta=20",
+      "isoPEPS chi=4 eta=8",
+      "PEPS tangent-space chi=2",
+      "PEPS tangent-space chi=4"
+    ]
+  },
+  "records": [
+    {"g": 3.5, "state_index": 0, "reference_energy": -57.82436977, "published_relative_errors": {"block_isopeps_chi12_eta20": 1.17e-4, "block_isopeps_chi4_eta8": 9.85e-4, "peps_tangent_chi2": 9.68e-6, "peps_tangent_chi4": 2.73e-9}},
+    {"g": 3.5, "state_index": 1, "reference_energy": -54.38401656, "published_relative_errors": {"block_isopeps_chi12_eta20": 1.57e-4, "block_isopeps_chi4_eta8": 7.44e-4, "peps_tangent_chi2": 4.77e-6, "peps_tangent_chi4": 7.39e-9}},
+    {"g": 3.0, "state_index": 0, "reference_energy": -50.18662388, "published_relative_errors": {"block_isopeps_chi12_eta20": 9.85e-5, "block_isopeps_chi4_eta8": 1.07e-3, "peps_tangent_chi2": 5.28e-3, "peps_tangent_chi4": 2.51e-9}},
+    {"g": 3.0, "state_index": 1, "reference_energy": -47.80516396, "published_relative_errors": {"block_isopeps_chi12_eta20": 1.65e-4, "block_isopeps_chi4_eta8": 1.23e-3, "peps_tangent_chi2": 4.47e-3, "peps_tangent_chi4": 6.19e-9}},
+    {"g": 2.0, "state_index": 0, "reference_energy": -35.90725762, "published_relative_errors": {"block_isopeps_chi12_eta20": 1.11e-4, "block_isopeps_chi4_eta8": 1.10e-3, "peps_tangent_chi2": 8.68e-3, "peps_tangent_chi4": 2.42e-7}},
+    {"g": 2.0, "state_index": 1, "reference_energy": -35.52133640, "published_relative_errors": {"block_isopeps_chi12_eta20": 1.97e-4, "block_isopeps_chi4_eta8": 1.01e-3, "peps_tangent_chi2": 3.48e-2, "peps_tangent_chi4": 2.70e-7}},
+    {"g": 1.0, "state_index": 0, "reference_energy": -26.86050464, "published_relative_errors": {"block_isopeps_chi12_eta20": 2.62e-5, "block_isopeps_chi4_eta8": 1.38e-4, "peps_tangent_chi2": 1.10e-3, "peps_tangent_chi4": 1.45e-6}},
+    {"g": 1.0, "state_index": 1, "reference_energy": -26.86046483, "published_relative_errors": {"block_isopeps_chi12_eta20": 2.46e-5, "block_isopeps_chi4_eta8": 1.76e-4, "peps_tangent_chi2": null, "peps_tangent_chi4": null}}
+  ]
+}

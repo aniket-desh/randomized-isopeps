@@ -29,6 +29,8 @@ import quimb as qu
 import quimb.tensor as qtn
 from quimb.tensor.tensor_2d_tebd import LocalHam2D
 
+from rand_isopeps.backend import to_numpy
+
 from .moses_move import RandSVD, moses_move
 
 
@@ -128,7 +130,10 @@ def _sweep(psi, gates, chi, eta, cutoff, Ndis, direction, rand):
 
 def energy(psi, ham: LocalHam2D, max_bond: int = 32) -> float:
     """Energy <psi|H|psi>/<psi|psi> via a boundary-contraction of the 2D network."""
-    return float(psi.compute_local_expectation(ham.terms, normalized=True, max_bond=max_bond).real)
+    value = psi.compute_local_expectation(
+        ham.terms, normalized=True, max_bond=max_bond
+    )
+    return float(to_numpy(value).real)
 
 
 def imaginary_time(psi, ham, taus, steps, chi, eta, cutoff=1e-10, Ndis=10,

@@ -1,6 +1,8 @@
 """Phase-0 (0A/0B/0C) smoke tests for the real Moses Move per-stage control +
 instrumentation. Skipped when quimb is not installed."""
 
+import importlib
+
 import numpy as np
 import pytest
 
@@ -70,3 +72,27 @@ def test_per_stage_toggle_isolates_stage():
     assert errs is not None
     assert all(r.ell == r.k for r in s2.records if r.stage == "svd1")
     assert any(r.stage == "svd2" for r in s2.records)
+
+
+def test_random_isotns_threads_the_disentangler(monkeypatch):
+    module = importlib.import_module("rand_isopeps.real_isotns.moses_move")
+    calls = []
+
+    def capture(*args, **kwargs):
+        calls.append(kwargs)
+        return np.zeros((2, 1))
+
+    monkeypatch.setattr(module, "moses_move", capture)
+    module.random_isotns(
+        2,
+        2,
+        bond=1,
+        chi=2,
+        eta=2,
+        Ndis=3,
+        disentangler="riemannian_renyi",
+        seed=4,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["disentangler"] == "riemannian_renyi"
