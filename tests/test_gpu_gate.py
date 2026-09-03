@@ -51,6 +51,7 @@ def test_power_parity_checks_the_adjoint_chain(monkeypatch):
             return self.adjoint_scale * np.asarray(value)
 
     monkeypatch.setattr(gpu_pilot, "mps_to_vector", np.asarray)
+    monkeypatch.setattr(gpu_pilot, "canonicalize_mps_exact", np.asarray)
     cpu = Operator(3.0)
     device = Operator(4.0)
     probe = np.asarray([1.0, 2.0])

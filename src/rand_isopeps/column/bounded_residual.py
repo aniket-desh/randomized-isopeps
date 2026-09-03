@@ -44,7 +44,10 @@ from rand_isopeps.backend import (
     to_numpy,
 )
 from rand_isopeps.column.operator import ColumnOperator
-from rand_isopeps.compression.mpo_mps_absorb import max_mps_bond
+from rand_isopeps.compression.mpo_mps_absorb import (
+    canonicalize_mps_exact,
+    max_mps_bond,
+)
 from rand_isopeps.linalg.rmps_sketch import rmps_cores
 from rand_isopeps.linalg.sketches import range_sample
 from rand_isopeps.moses.disentangler import disentangle_altmin, unitary_defect
@@ -472,7 +475,7 @@ def _range_block_mps(
     rng: np.random.Generator,
     complex_valued: bool,
 ) -> tuple[list[np.ndarray], int, int, int]:
-    """Form ``C(C^*C)^q Omega`` through MPO-MPS products and retain MPS columns."""
+    """Form ``C(C^*C)^q Omega`` with exact bond reduction after each product."""
     columns: list[list[np.ndarray]] = []
     contractions = 0
     flops = 0
@@ -480,17 +483,18 @@ def _range_block_mps(
         omega = rmps_cores(column.input_dims, int(chi_sk), rng,
                            complex_valued=complex_valued)
         omega = [backend_asarray(core, like=column.cores[0]) for core in omega]
+        omega = canonicalize_mps_exact(omega)
         flops += _mpo_mps_flops(column.cores, omega)
-        sampled = column.matvec_mps(omega)
+        sampled = canonicalize_mps_exact(column.matvec_mps(omega))
         contractions += column.lx
         for _ in range(max(0, int(n_power))):
             xp = array_namespace(column.cores)
             adjoint = [xp.asarray(core).conj().transpose(0, 2, 1, 3)
                        for core in column.cores]
             flops += _mpo_mps_flops(adjoint, sampled)
-            sampled = column.rmatvec_mps(sampled)
+            sampled = canonicalize_mps_exact(column.rmatvec_mps(sampled))
             flops += _mpo_mps_flops(column.cores, sampled)
-            sampled = column.matvec_mps(sampled)
+            sampled = canonicalize_mps_exact(column.matvec_mps(sampled))
             contractions += 2 * column.lx
         columns.append(sampled)
     return (

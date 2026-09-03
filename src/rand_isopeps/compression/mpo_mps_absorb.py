@@ -133,6 +133,39 @@ def max_mps_bond(mps: list[np.ndarray]) -> int:
     return max(max(site.shape[0], site.shape[2]) for site in mps)
 
 
+def canonicalize_mps_exact(mps: list[np.ndarray]) -> list[np.ndarray]:
+    """remove redundant mps bonds with exact two-sided qr sweeps."""
+    if not mps:
+        raise ValueError("an mps needs at least one core")
+    xp = array_namespace(mps)
+    work = [xp.asarray(site).copy() for site in mps]
+    if any(site.ndim != 3 for site in work):
+        raise ValueError("mps cores must have shape (left, physical, right)")
+    if work[0].shape[0] != 1 or work[-1].shape[2] != 1:
+        raise ValueError("mps boundary bonds must be one")
+    if any(left.shape[2] != right.shape[0] for left, right in zip(work, work[1:])):
+        raise ValueError("mps bond mismatch")
+
+    for index in range(len(work) - 1, 0, -1):
+        left, physical, right = map(int, work[index].shape)
+        matrix = work[index].reshape(left, physical * right)
+        q, r = xp.linalg.qr(matrix.conj().T, mode="reduced")
+        rank = int(q.shape[1])
+        work[index] = q.conj().T.reshape(rank, physical, right)
+        work[index - 1] = xp.tensordot(
+            work[index - 1], r.conj().T, axes=(2, 0)
+        )
+
+    for index in range(len(work) - 1):
+        left, physical, right = map(int, work[index].shape)
+        matrix = work[index].reshape(left * physical, right)
+        q, r = xp.linalg.qr(matrix, mode="reduced")
+        rank = int(q.shape[1])
+        work[index] = q.reshape(left, physical, rank)
+        work[index + 1] = xp.tensordot(r, work[index + 1], axes=(1, 0))
+    return work
+
+
 def mps_to_vector(mps: list[np.ndarray]) -> np.ndarray:
     xp = array_namespace(mps)
     state = xp.asarray(mps[0])[0, :, :]

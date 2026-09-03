@@ -8,7 +8,11 @@ import numpy as np
 
 from rand_isopeps.backend import synchronize, to_numpy
 from rand_isopeps.column.operator import ColumnOperator, random_column_operator
-from rand_isopeps.compression.mpo_mps_absorb import mps_to_vector
+from rand_isopeps.compression.mpo_mps_absorb import (
+    canonicalize_mps_exact,
+    max_mps_bond,
+    mps_to_vector,
+)
 from rand_isopeps.linalg.rmps_sketch import rmps_cores
 
 
@@ -23,9 +27,10 @@ def _device_arrays(arrays, backend: str):
 
 
 def _power_output(operator, probe, n_power: int):
-    output = operator.matvec_mps(probe)
+    output = canonicalize_mps_exact(operator.matvec_mps(probe))
     for _ in range(int(n_power)):
-        output = operator.matvec_mps(operator.rmatvec_mps(output))
+        output = canonicalize_mps_exact(operator.rmatvec_mps(output))
+        output = canonicalize_mps_exact(operator.matvec_mps(output))
     return output
 
 
@@ -55,11 +60,13 @@ def run_gpu_pilot(task: dict) -> list[dict]:
     operator = ColumnOperator(_device_arrays(cpu_operator.cores, backend))
     ell = int(method.get("ell", 8))
     probes_cpu = [
-        rmps_cores(
-            cpu_operator.input_dims,
-            int(method.get("chi_sk", 8)),
-            np.random.default_rng(int(task["seeds"]["sketch"]) + index),
-            complex_valued=True,
+        canonicalize_mps_exact(
+            rmps_cores(
+                cpu_operator.input_dims,
+                int(method.get("chi_sk", 8)),
+                np.random.default_rng(int(task["seeds"]["sketch"]) + index),
+                complex_valued=True,
+            )
         )
         for index in range(ell)
     ]
@@ -100,6 +107,8 @@ def run_gpu_pilot(task: dict) -> list[dict]:
         "parity_passed": True,
         "parity_scope": "full_power_chain",
         "parity_matrix_products": 1 + 2 * n_power,
+        "power_rounding": "exact_two_sided_qr",
+        "maximum_output_bond": max(max_mps_bond(output) for output in outputs),
         "timings_s": measured,
         "median_runtime_s": float(np.median(measured)),
         "minimum_runtime_s": float(np.min(measured)),
